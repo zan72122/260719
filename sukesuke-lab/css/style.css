@@ -100,7 +100,7 @@ html, body {
 
 #game { background: transparent; }
 
-#stage, #stage svg {
+#stage, #stage svg, #stage canvas {
   position: absolute;
   inset: 0;
   width: 100%;

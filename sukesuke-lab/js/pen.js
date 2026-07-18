@@ -1,252 +1,552 @@
-/* ノック式ボールペンの中身 */
+/* ノック式ボールペンの中身 — 写実3D版 (Three.js)
+ *
+ * 実在の透明軸ノック式ボールペンをマクロ撮影したような画を目標にする。
+ * 機構は実物準拠の回転カム式ラッチ:
+ *   ノック → バネ圧縮 → 最下点でカムが回転(カチッ) → 芯が係合位置で固定
+ *   もう一度ノック → カムがさらに回転 → バネが芯を押し戻す
+ * 単位は mm。ペンはローカル +Y 軸沿い、ペン先端がローカル原点。
+ */
 window.GAMES.pen = (() => {
-  const COLORS = ['#ff5d8f', '#ff9f43', '#f9ca24', '#4cd137', '#00a8ff', '#8f6bff'];
-  const PRESS_MAX = 80;      // ノックの押し込み量(px)
-  const REFILL_OUT = 58;     // 芯が出るときの移動量(px)
+  const PRESS_MAX = 8;     // ノックの最大押し込み量
+  const TIP_OUT = 5;       // 係合時に芯が繰り出される量
+  const CLICK_DEPTH = 6.8; // カムが回るストローク位置
 
-  let svg, raf, prev, fx, dom, time;
-  let knock, refill;         // バネアニメ
-  let engaged, maxPress, pressId, drawId, pressY0;
-  let knockTimes, shakeT, dizzyT, surpriseT;
-  let colorIdx, curPath, lastPt, ptCount;
+  let stage, renderer, scene, camera, raf, prev, time;
+  let penRoot, plungerG, refillG, camG, springMesh, knockHit;
+  let paperMesh, paperCtx, paperTex;
+  let plunger, refill, camAngle, camTarget;
+  let engaged, clicked, pendingRelease, pressId, pressY0, maxDepth;
+  let drawId, lastUV, scratch, scratchLevel;
+  let orbitId, orbit, orbitFrom;
+  let penPose; // 'home' | 'draw'
+  let drawPoint, resizeHandler;
 
-  function build(stage) {
-    svg = U.makeSvg(stage, 1000, 1000);
-    engaged = false; maxPress = 0; pressId = null; drawId = null;
-    knockTimes = []; shakeT = 0; dizzyT = 0; surpriseT = 0;
-    colorIdx = 0; curPath = null; time = 0;
-    knock = U.spring(0);
-    refill = U.spring(0);
-    dom = {};
+  const raycaster = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
 
-    const defs = U.el('defs', {}, svg);
-    const clip = U.el('clipPath', { id: 'penPaperClip' }, defs);
-    U.el('rect', { x: 430, y: 130, width: 520, height: 510, rx: 24 }, clip);
+  /* ---------------- 素材 ---------------- */
 
-    /* ---- 紙 ---- */
-    U.el('rect', { x: 430, y: 130, width: 520, height: 510, rx: 24, fill: '#fffef8', stroke: '#e3d9ff', 'stroke-width': 6 }, svg);
-    for (let i = 0; i < 4; i++) {
-      U.el('line', { x1: 460, y1: 240 + i * 100, x2: 920, y2: 240 + i * 100, stroke: '#f0eaff', 'stroke-width': 4 }, svg);
+  function makeMaterials() {
+    return {
+      /* 透明ボディ: 実屈折するクリア樹脂 */
+      glass: new THREE.MeshPhysicalMaterial({
+        color: 0xf4fbff, metalness: 0, roughness: 0.06,
+        transmission: 0.96, thickness: 1.6, ior: 1.5,
+        clearcoat: 1, clearcoatRoughness: 0.08,
+        side: THREE.DoubleSide,
+      }),
+      /* 紺色のABS樹脂 (ノックボタン・クリップ) */
+      navy: new THREE.MeshPhysicalMaterial({
+        color: 0x122a5e, metalness: 0, roughness: 0.42,
+        clearcoat: 0.35, clearcoatRoughness: 0.3, envMapIntensity: 0.45,
+      }),
+      /* 乳白色のPOM (カム・回転子) */
+      pom: new THREE.MeshStandardMaterial({ color: 0xded8c8, roughness: 0.5, envMapIntensity: 0.45 }),
+      /* バネ鋼 */
+      steel: new THREE.MeshStandardMaterial({ color: 0x8f959e, metalness: 0.95, roughness: 0.36, envMapIntensity: 0.85 }),
+      /* 真鍮のペン先 */
+      brass: new THREE.MeshStandardMaterial({ color: 0xb8903e, metalness: 1, roughness: 0.3, envMapIntensity: 0.9 }),
+      /* クロームの締めリング */
+      chrome: new THREE.MeshStandardMaterial({ color: 0xdadde2, metalness: 1, roughness: 0.15, envMapIntensity: 0.9 }),
+      /* 半透明ポリプロピレンのリフィル管 */
+      tube: new THREE.MeshPhysicalMaterial({
+        color: 0xf5f4ee, metalness: 0, roughness: 0.55,
+        transmission: 0.5, thickness: 1, ior: 1.45, envMapIntensity: 0.4,
+      }),
+      /* インク */
+      ink: new THREE.MeshStandardMaterial({ color: 0x0c1436, roughness: 0.42, envMapIntensity: 0.18 }),
+    };
+  }
+
+  /* ---------------- テクスチャ ---------------- */
+
+  function woodTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 512;
+    const ctx = cv.getContext('2d');
+    for (let plank = 0; plank < 4; plank++) {
+      const y0 = plank * 128;
+      const base = 92 + (plank % 2) * 10 + Math.random() * 8;
+      ctx.fillStyle = `rgb(${(base + 52) | 0},${(base + 12) | 0},${(base - 26) | 0})`;
+      ctx.fillRect(0, y0, 512, 128);
+      /* 木目 */
+      for (let i = 0; i < 46; i++) {
+        const gy = y0 + Math.random() * 128;
+        const dark = Math.random() * 0.13 + 0.03;
+        ctx.strokeStyle = `rgba(58,36,18,${dark.toFixed(3)})`;
+        ctx.lineWidth = Math.random() * 2.2 + 0.4;
+        ctx.beginPath();
+        const amp = Math.random() * 3 + 1;
+        const ph = Math.random() * 7;
+        ctx.moveTo(0, gy);
+        for (let x = 0; x <= 512; x += 16) {
+          ctx.lineTo(x, gy + Math.sin(x * 0.02 + ph) * amp);
+        }
+        ctx.stroke();
+      }
+      /* 板の継ぎ目 */
+      ctx.fillStyle = 'rgba(40,24,12,0.55)';
+      ctx.fillRect(0, y0 + 126, 512, 2);
     }
-    dom.paperHint = U.text('かけるかな？', { x: 690, y: 195, 'text-anchor': 'middle', 'font-size': 34, fill: '#cbbcf5' }, svg);
-    dom.strokes = U.el('g', { 'clip-path': 'url(#penPaperClip)', fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2.5, 2.5);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = 4;
+    return tex;
+  }
 
-    /* けしごむボタン */
-    const eraser = U.el('g', {}, svg);
-    U.el('circle', { cx: 890, cy: 700, r: 38, fill: '#ffe9a8', stroke: '#f5c542', 'stroke-width': 5 }, eraser);
-    U.text('🧹', { x: 890, y: 714, 'text-anchor': 'middle', 'font-size': 40 }, eraser);
+  function makePaperCanvas() {
+    const cv = document.createElement('canvas');
+    cv.width = 768;
+    cv.height = 1024;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fbfaf5';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    /* 紙の繊維ノイズ */
+    for (let i = 0; i < 9000; i++) {
+      const g = (225 + Math.random() * 30) | 0;
+      ctx.fillStyle = `rgba(${g},${g - 3},${g - 8},0.25)`;
+      ctx.fillRect(Math.random() * cv.width, Math.random() * cv.height, 1.4, 1);
+    }
+    /* 薄い罫線 */
+    ctx.strokeStyle = 'rgba(150,168,192,0.45)';
+    ctx.lineWidth = 1.6;
+    for (let y = 120; y < cv.height - 30; y += 82) {
+      ctx.beginPath();
+      ctx.moveTo(46, y);
+      ctx.lineTo(cv.width - 46, y);
+      ctx.stroke();
+    }
+    return { cv, ctx };
+  }
 
-    /* ---- ペン全体（ゆれ用グループ） ---- */
-    dom.pen = U.el('g', {}, svg);
+  function gradientBG() {
+    const cv = document.createElement('canvas');
+    cv.width = 2;
+    cv.height = 256;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, '#efece5');
+    g.addColorStop(0.55, '#ddd7cc');
+    g.addColorStop(1, '#b8b0a2');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
+  }
 
-    /* ノックまわりの「おしてね」リング */
-    dom.pressRing = U.el('circle', { cx: 270, cy: 150, r: 70, fill: 'none', stroke: '#ffd93b', 'stroke-width': 8, opacity: 0.5 }, dom.pen);
+  /* ---------------- ばね (実ヘリックス) ---------------- */
 
-    /* ノックボタン（プランジャー） */
-    dom.plunger = U.el('g', {}, dom.pen);
-    U.el('rect', { x: 235, y: 110, width: 70, height: 130, rx: 18, fill: '#ff6b81', stroke: '#e0455e', 'stroke-width': 5 }, dom.plunger);
-    U.el('rect', { x: 251, y: 122, width: 14, height: 40, rx: 7, fill: '#ffffff', opacity: 0.55 }, dom.plunger);
-    U.text('👇', { x: 270, y: 100, 'text-anchor': 'middle', 'font-size': 40 }, dom.plunger);
+  class Helix extends THREE.Curve {
+    constructor(y0, len, coils, r) {
+      super();
+      this.y0 = y0; this.len = len; this.coils = coils; this.r = r;
+    }
+    getPoint(t, target) {
+      const p = target || new THREE.Vector3();
+      const a = t * this.coils * Math.PI * 2;
+      return p.set(Math.cos(a) * this.r, this.y0 + t * this.len, Math.sin(a) * this.r);
+    }
+  }
 
-    /* 芯（リフィル）グループ */
-    dom.refill = U.el('g', {}, dom.pen);
-    U.el('rect', { x: 252, y: 250, width: 36, height: 340, rx: 12, fill: '#ffffff', opacity: 0.55, stroke: '#b9a7ff', 'stroke-width': 4 }, dom.refill);
-    U.el('rect', { x: 258, y: 400, width: 24, height: 186, rx: 8, fill: '#ff7ab6' }, dom.refill);
-    U.el('rect', { x: 246, y: 586, width: 48, height: 18, rx: 8, fill: '#b9a7ff' }, dom.refill);
-    U.el('path', { d: 'M 258 604 L 270 700 L 282 604 Z', fill: '#9aa7b8', stroke: '#7f8fa6', 'stroke-width': 3 }, dom.refill);
-    dom.tipBall = U.el('circle', { cx: 270, cy: 700, r: 7, fill: '#576574' }, dom.refill);
+  let springLenShown = -1;
+  function updateSpring() {
+    const top = 38.8 + refill.p;
+    const len = top - 15.5;
+    if (Math.abs(len - springLenShown) < 0.04) return;
+    springLenShown = len;
+    const geo = new THREE.TubeGeometry(new Helix(15.5, len, 7, 3.1), 210, 0.42, 8, false);
+    if (springMesh) {
+      springMesh.geometry.dispose();
+      springMesh.geometry = geo;
+    } else {
+      springMesh = new THREE.Mesh(geo, materialsRef.steel);
+      springMesh.castShadow = true;
+      penRoot.add(springMesh);
+    }
+  }
 
-    /* インク玉（かお付き） */
-    dom.inkBall = U.el('g', {}, dom.refill);
-    U.el('circle', { cx: 270, cy: 372, r: 26, fill: '#ff7ab6', stroke: '#ffffff', 'stroke-width': 4 }, dom.inkBall);
-    dom.eyeL = U.text('•', { x: 260, y: 372, 'text-anchor': 'middle', 'font-size': 26, fill: '#5d2a44' }, dom.inkBall);
-    dom.eyeR = U.text('•', { x: 280, y: 372, 'text-anchor': 'middle', 'font-size': 26, fill: '#5d2a44' }, dom.inkBall);
-    dom.mouth = U.el('path', { d: 'M 261 382 Q 270 390 279 382', fill: 'none', stroke: '#5d2a44', 'stroke-width': 3, 'stroke-linecap': 'round' }, dom.inkBall);
+  /* ---------------- 組み立て ---------------- */
 
-    /* ばね（芯のまわりにぐるぐる、目立つように上へ） */
-    dom.spring = U.el('path', { fill: 'none', stroke: '#ff9f43', 'stroke-width': 12, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0.95 }, dom.pen);
+  function buildPen(mats) {
+    penRoot = new THREE.Group();
+    scene.add(penRoot);
 
-    /* 透明ボディ（芯の上にかぶせてスケスケに） */
-    U.el('rect', { x: 200, y: 200, width: 140, height: 420, rx: 28, fill: '#bfe6ff', opacity: 0.32, stroke: '#6fbfe6', 'stroke-width': 6 }, dom.pen);
-    U.el('path', { d: 'M 212 620 L 258 728 L 282 728 L 328 620 Z', fill: '#bfe6ff', opacity: 0.32, stroke: '#6fbfe6', 'stroke-width': 6, 'stroke-linejoin': 'round' }, dom.pen);
-    U.el('rect', { x: 208, y: 216, width: 16, height: 130, rx: 8, fill: '#ffffff', opacity: 0.5 }, dom.pen);
+    const add = (parent, geo, mat, y, pos) => {
+      const m = new THREE.Mesh(geo, mat);
+      if (pos) m.position.set(pos[0], y, pos[1]);
+      else m.position.y = y;
+      m.castShadow = true;
+      parent.add(m);
+      return m;
+    };
 
-    /* 爪（ラッチ） */
-    dom.latch = U.el('rect', { x: 332, y: 288, width: 36, height: 30, rx: 9, fill: '#ff5d8f', stroke: '#e0455e', 'stroke-width': 4 }, dom.pen);
+    /* --- 透明ボディ --- */
+    add(penRoot, new THREE.CylinderGeometry(5.6, 2.3, 22, 48, 1, true), mats.glass, 11);
+    add(penRoot, new THREE.CylinderGeometry(5.6, 5.6, 96, 48, 1, true), mats.glass, 70);
+    add(penRoot, new THREE.CylinderGeometry(4.0, 5.6, 6, 48, 1, true), mats.glass, 121);
+    add(penRoot, new THREE.CylinderGeometry(5.75, 5.75, 3.6, 48), mats.chrome, 117);
 
-    /* おえかきカーソル */
-    dom.cursor = U.el('circle', { r: 12, fill: 'none', 'stroke-width': 5, opacity: 0 }, svg);
+    /* クリップ */
+    add(penRoot, new THREE.BoxGeometry(2.6, 36, 1.5), mats.navy, 97, [0, 6.9]);
+    add(penRoot, new THREE.BoxGeometry(2.6, 2.2, 3.4), mats.navy, 114.5, [0, 5.9]);
 
-    fx = makeFxLayer(svg);
+    /* --- ノックボタン --- */
+    plungerG = new THREE.Group();
+    penRoot.add(plungerG);
+    add(plungerG, new THREE.CylinderGeometry(3.4, 3.4, 11, 32), mats.navy, 128.5);
+    add(plungerG, new THREE.SphereGeometry(3.4, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mats.navy, 134);
+    add(plungerG, new THREE.CylinderGeometry(2.7, 2.7, 16, 24), mats.pom, 115);
 
-    svg.addEventListener('pointerdown', onDown);
-    svg.addEventListener('pointermove', onMove);
-    svg.addEventListener('pointerup', onUp);
-    svg.addEventListener('pointercancel', onUp);
+    /* ノック用のあたり判定 (不可視・指サイズ) */
+    knockHit = new THREE.Mesh(
+      new THREE.CylinderGeometry(15, 15, 46, 12),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    knockHit.position.y = 124;
+    penRoot.add(knockHit);
+
+    /* --- リフィル (芯) --- */
+    refillG = new THREE.Group();
+    penRoot.add(refillG);
+    add(refillG, new THREE.CylinderGeometry(1.7, 0.85, 9, 24), mats.brass, 6.5);
+    add(refillG, new THREE.SphereGeometry(0.6, 16, 12), mats.steel, 1.8);
+    add(refillG, new THREE.CylinderGeometry(1.55, 1.55, 88, 20), mats.tube, 55);
+    add(refillG, new THREE.CylinderGeometry(1.16, 1.16, 58, 16), mats.ink, 40);
+    add(refillG, new THREE.CylinderGeometry(2.7, 2.7, 2.4, 24), mats.pom, 39.5);
+
+    /* 回転カム (ラッチ機構の心臓部) */
+    camG = new THREE.Group();
+    camG.position.y = 101;
+    refillG.add(camG);
+    add(camG, new THREE.CylinderGeometry(2.8, 2.8, 6, 24), mats.pom, 0);
+    for (let i = 0; i < 6; i++) {
+      const tooth = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3.2, 1.5), mats.pom);
+      const a = (i / 6) * Math.PI * 2;
+      tooth.position.set(Math.cos(a) * 2.5, 1.2, Math.sin(a) * 2.5);
+      tooth.rotation.y = -a;
+      tooth.castShadow = true;
+      camG.add(tooth);
+    }
+  }
+
+  function buildScene() {
+    /* 机 */
+    const desk = new THREE.Mesh(
+      new THREE.PlaneGeometry(1000, 1000),
+      new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.62 })
+    );
+    desk.rotation.x = -Math.PI / 2;
+    desk.receiveShadow = true;
+    scene.add(desk);
+
+    /* メモ用紙 (書ける) */
+    const paper = makePaperCanvas();
+    paperCtx = paper.ctx;
+    paperTex = new THREE.CanvasTexture(paper.cv);
+    paperTex.encoding = THREE.sRGBEncoding;
+    paperTex.anisotropy = 8;
+    paperMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 200),
+      new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.88 })
+    );
+    paperMesh.rotation.x = -Math.PI / 2;
+    paperMesh.rotation.z = -0.1;
+    paperMesh.position.set(88, 2.3, 8);
+    paperMesh.receiveShadow = true;
+    scene.add(paperMesh);
+
+    /* メモ帳の厚み */
+    const pad = new THREE.Mesh(
+      new THREE.BoxGeometry(150, 2.2, 200),
+      new THREE.MeshStandardMaterial({ color: 0xece7da, roughness: 0.9 })
+    );
+    pad.rotation.y = -0.1;
+    pad.position.set(88, 1.1, 8);
+    pad.castShadow = true;
+    pad.receiveShadow = true;
+    scene.add(pad);
+
+    /* ライティング */
+    const key = new THREE.DirectionalLight(0xfff4e4, 1.05);
+    key.position.set(130, 260, 170);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.left = -180;
+    key.shadow.camera.right = 180;
+    key.shadow.camera.top = 180;
+    key.shadow.camera.bottom = -180;
+    key.shadow.camera.far = 700;
+    key.shadow.bias = -0.0004;
+    scene.add(key);
+    scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x8a7a64, 0.4));
+
+    /* 環境マップ (映り込み) */
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envTex = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+    scene.environment = envTex;
+    pmrem.dispose();
+
+    scene.background = gradientBG();
+  }
+
+  /* ---------------- 入力 ---------------- */
+
+  function pointerNDC(e) {
+    const r = renderer.domElement.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    return ndc;
   }
 
   function onDown(e) {
-    const p = U.toView(svg, e.clientX, e.clientY);
+    raycaster.setFromCamera(pointerNDC(e), camera);
 
-    /* けしごむ */
-    if (Math.hypot(p.x - 890, p.y - 700) < 48) {
-      dom.strokes.innerHTML = '';
-      fx.puff(890, 700, '#ffffff', 6);
-      S.pop();
-      return;
-    }
-
-    /* ノック */
-    if (pressId === null && p.x > 170 && p.x < 370 && p.y > 50 && p.y < 300) {
-      pressId = e.pointerId;
-      pressY0 = p.y;
-      maxPress = 0;
-      knock.t = PRESS_MAX;   // タップだけでも押し込まれる
-      maxPress = PRESS_MAX * 0.7;
-      S.squish();
-      return;
-    }
-
-    /* 紙 */
-    if (drawId === null && p.x > 430 && p.x < 950 && p.y > 130 && p.y < 640) {
-      if (engaged) {
-        drawId = e.pointerId;
-        const color = COLORS[colorIdx++ % COLORS.length];
-        curPath = U.el('path', { d: `M ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, stroke: color, 'stroke-width': 16 }, dom.strokes);
-        lastPt = p; ptCount = 0;
-        dom.cursor.setAttribute('opacity', 1);
-        dom.cursor.setAttribute('stroke', color);
-        moveCursor(p);
-        dom.paperHint.setAttribute('opacity', 0);
-        S.tick();
-      } else {
-        /* 芯が出てないよ！ */
-        surpriseT = 1.2;
-        S.wobble();
-        fx.puff(p.x, p.y, '#e3d9ff', 4);
+    if (pressId === null) {
+      const hit = raycaster.intersectObject(knockHit, false);
+      if (hit.length) {
+        pressId = e.pointerId;
+        pressY0 = e.clientY;
+        maxDepth = 0;
+        plunger.t = PRESS_MAX;   /* タップだけでも押し切れる */
+        return;
       }
+    }
+    if (drawId === null) {
+      const hit = raycaster.intersectObject(paperMesh, false);
+      if (hit.length) {
+        drawId = e.pointerId;
+        penPose = 'draw';
+        drawPoint.copy(hit[0].point);
+        lastUV = hit[0].uv.clone();
+        if (engaged) scratchStart();
+        return;
+      }
+    }
+    if (orbitId === null) {
+      orbitId = e.pointerId;
+      orbitFrom = { x: e.clientX, y: e.clientY, az: orbit.az, po: orbit.po };
     }
   }
 
   function onMove(e) {
-    const p = U.toView(svg, e.clientX, e.clientY);
     if (e.pointerId === pressId) {
-      knock.t = U.clamp(p.y - pressY0 + PRESS_MAX * 0.7, 0, PRESS_MAX);
-      maxPress = Math.max(maxPress, knock.t);
-    } else if (e.pointerId === drawId && curPath) {
-      if (Math.hypot(p.x - lastPt.x, p.y - lastPt.y) > 7) {
-        curPath.setAttribute('d', curPath.getAttribute('d') + ` L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
-        lastPt = p;
-        moveCursor(p);
-        if (++ptCount % 14 === 0) S.sparkle();
+      const r = renderer.domElement.getBoundingClientRect();
+      const extra = ((e.clientY - pressY0) / r.height) * 95;
+      plunger.t = U.clamp(PRESS_MAX * 0.85 + extra, 0, PRESS_MAX);
+    } else if (e.pointerId === drawId) {
+      raycaster.setFromCamera(pointerNDC(e), camera);
+      const hit = raycaster.intersectObject(paperMesh, false);
+      if (hit.length) {
+        drawPoint.copy(hit[0].point);
+        const uv = hit[0].uv;
+        if (engaged && lastUV) {
+          drawStroke(lastUV, uv);
+          const d = Math.hypot(uv.x - lastUV.x, uv.y - lastUV.y);
+          scratchLevel = Math.min(1, scratchLevel + d * 30);
+        }
+        lastUV = uv.clone();
       }
+    } else if (e.pointerId === orbitId) {
+      orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.5, 1.25);
+      orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.72, 1.5);
     }
   }
 
   function onUp(e) {
     if (e.pointerId === pressId) {
       pressId = null;
-      knock.t = 0;
-      if (maxPress > 45) {
-        toggleEngaged();
-        const now = performance.now();
-        knockTimes.push(now);
-        knockTimes = knockTimes.filter(t => now - t < 1500);
-        if (knockTimes.length >= 4) {
-          knockTimes = [];
-          shakeT = 1;
-          dizzyT = 1.8;
-          S.wobble();
-          fx.burst(270, 380, '#ffd93b', 10);
-        }
-      }
+      pendingRelease = true;   /* ラッチの確定はプランジャーの戻り行程で行う */
     } else if (e.pointerId === drawId) {
       drawId = null;
-      curPath = null;
-      dom.cursor.setAttribute('opacity', 0);
+      lastUV = null;
+      penPose = 'home';
+      scratchStop();
+    } else if (e.pointerId === orbitId) {
+      orbitId = null;
     }
   }
 
-  function moveCursor(p) {
-    dom.cursor.setAttribute('cx', p.x);
-    dom.cursor.setAttribute('cy', p.y);
+  /* ---------------- 筆記 ---------------- */
+
+  function drawStroke(uv0, uv1) {
+    const W = 768, H = 1024;
+    const x0 = uv0.x * W, y0 = (1 - uv0.y) * H;
+    const x1 = uv1.x * W, y1 = (1 - uv1.y) * H;
+    const speed = Math.hypot(x1 - x0, y1 - y0);
+    paperCtx.strokeStyle = 'rgba(23,32,88,0.9)';
+    paperCtx.lineCap = 'round';
+    paperCtx.lineJoin = 'round';
+    paperCtx.lineWidth = U.clamp(3.6 - speed * 0.04, 2.2, 3.6); /* 速く書くと少し細い */
+    paperCtx.beginPath();
+    paperCtx.moveTo(x0, y0);
+    paperCtx.lineTo(x1, y1);
+    paperCtx.stroke();
+    paperTex.needsUpdate = true;
   }
 
-  function toggleEngaged() {
-    engaged = !engaged;
-    S.kachi();
-    fx.burst(348, 303, '#ffd93b', 6, 11);
-    if (engaged) {
-      refill.t = REFILL_OUT;
-      S.pop(0.1);
-    } else {
-      refill.t = 0;
-      S.boing(280);
-    }
+  function scratchStart() {
+    if (!scratch) scratch = S.scratchLoop();
   }
+  function scratchStop() {
+    if (scratch) { scratch.stop(); scratch = null; }
+    scratchLevel = 0;
+  }
+
+  /* ---------------- メインループ ---------------- */
 
   function loop(now) {
     const dt = Math.min((now - prev) / 1000, 0.033);
     prev = now;
     time += dt;
 
-    U.stepSpring(knock, dt, 1400, 16);
-    U.stepSpring(refill, dt, 420, 8);   // びよんと戻る
-    fx.step(dt);
-
-    dom.plunger.setAttribute('transform', `translate(0 ${knock.p.toFixed(1)})`);
-    dom.refill.setAttribute('transform', `translate(0 ${refill.p.toFixed(1)})`);
-
-    /* ばね：芯のえりの下 〜 先端のなか（固定） */
-    const springTop = 604 + refill.p;
-    dom.spring.setAttribute('d', U.springPathV(270, springTop, 700, 4, 40));
-
-    /* 爪：カチッと出入り */
-    const latchX = U.lerp(parseFloat(dom.latch.getAttribute('x')), engaged ? 316 : 332, Math.min(1, dt * 18));
-    dom.latch.setAttribute('x', latchX.toFixed(1));
-
-    /* 「おしてね」リング：ふわふわ */
-    dom.pressRing.setAttribute('opacity', (0.28 + 0.22 * Math.sin(time * 4)).toFixed(2));
-    dom.pressRing.setAttribute('r', (66 + 6 * Math.sin(time * 4)).toFixed(1));
-
-    /* ペンのゆれ（れんだギャグ） */
-    if (shakeT > 0) {
-      shakeT = Math.max(0, shakeT - dt);
-      const a = Math.sin(time * 42) * 7 * shakeT;
-      dom.pen.setAttribute('transform', `rotate(${a.toFixed(2)} 270 420)`);
-    } else {
-      dom.pen.setAttribute('transform', '');
+    /* 指を離しても、押し切ったストロークは最下点まで進んでから戻る */
+    if (pendingRelease) {
+      if (clicked || plunger.t < CLICK_DEPTH) plunger.t = 0;
     }
 
-    /* インク玉のかお */
-    if (dizzyT > 0) {
-      dizzyT -= dt;
-      dom.eyeL.textContent = '×'; dom.eyeR.textContent = '×';
-      dom.mouth.setAttribute('d', 'M 262 386 Q 270 380 278 386');
-      dom.inkBall.setAttribute('transform', `rotate(${(Math.sin(time * 20) * 14).toFixed(1)} 270 372)`);
-    } else if (surpriseT > 0) {
-      surpriseT -= dt;
-      dom.eyeL.textContent = '•'; dom.eyeR.textContent = '•';
-      dom.mouth.setAttribute('d', 'M 266 382 a 4 5 0 1 0 8 0 a 4 5 0 1 0 -8 0');
-      dom.inkBall.setAttribute('transform', '');
-    } else {
-      dom.eyeL.textContent = '•'; dom.eyeR.textContent = '•';
-      dom.mouth.setAttribute('d', 'M 261 382 Q 270 390 279 382');
-      const wig = U.clamp(refill.v * 0.03, -10, 10);
-      dom.inkBall.setAttribute('transform', `rotate(${wig.toFixed(1)} 270 372)`);
+    /* ノック: 押し込みは機械的に固く、戻りはバネらしく */
+    U.stepSpring(plunger, dt, 1600, 34);
+    /* 最下点付近でカムが1歯回る (押し行程) */
+    if (plunger.p >= CLICK_DEPTH && plunger.v > 0 && !clicked) {
+      clicked = true;
+      camTarget += Math.PI / 3;   /* 60度 = 1歯ぶん */
+      S.clickReal(1);
     }
+    /* 戻り行程でラッチが確定する (実物と同じ順序) */
+    if (pendingRelease && clicked && plunger.p <= CLICK_DEPTH - 1.2 && plunger.v < 0) {
+      pendingRelease = false;
+      clicked = false;
+      engaged = !engaged;
+      plunger.t = engaged ? 1.2 : 0;
+      if (engaged) {
+        S.clickReal(0.85, 0.03);      /* 芯が係合して固定される音 */
+      } else {
+        S.snapBack();                  /* バネが芯をはね戻す */
+        camTarget += Math.PI / 3;      /* 戻りでカムがもう1歯すべる */
+      }
+    }
+    plungerG.position.y = -plunger.p;
 
+    /* 芯: プランジャーに押され、係合位置またはゼロ位置へバネで戻る */
+    refill.t = (engaged ? -TIP_OUT : 0) - plunger.p * 0.5;
+    U.stepSpring(refill, dt, engaged ? 1400 : 620, engaged ? 30 : 15);
+    refillG.position.y = refill.p;
+
+    /* カムの回転 */
+    camAngle += (camTarget - camAngle) * Math.min(1, dt * 24);
+    camG.rotation.y = camAngle;
+
+    updateSpring();
+
+    /* ペンの姿勢: 定位置 ⇄ 紙の上 */
+    const target = penPose === 'draw'
+      ? { x: drawPoint.x, y: 2.6, z: drawPoint.z, rz: 0.3, ry: -0.4 }
+      : { x: 0, y: 1.2, z: 0, rz: 0, ry: 0 };
+    const k = Math.min(1, dt * (penPose === 'draw' ? 14 : 7));
+    penRoot.position.x += (target.x - penRoot.position.x) * k;
+    penRoot.position.y += (target.y - penRoot.position.y) * k;
+    penRoot.position.z += (target.z - penRoot.position.z) * k;
+    penRoot.rotation.z += (target.rz - penRoot.rotation.z) * k;
+    penRoot.rotation.y += (target.ry - penRoot.rotation.y) * k;
+
+    /* 紙をこする音は速度で減衰 */
+    scratchLevel = Math.max(0, scratchLevel - dt * 6);
+    if (scratch) scratch.set(scratchLevel);
+
+    /* カメラ */
+    const sp = new THREE.Spherical(orbit.radius, orbit.po, orbit.az);
+    camera.position.setFromSpherical(sp).add(orbit.target);
+    camera.lookAt(orbit.target);
+
+    renderer.render(scene, camera);
     raf = requestAnimationFrame(loop);
   }
 
+  /* ---------------- 起動と後始末 ---------------- */
+
+  let materialsRef;
+
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    const aspect = w / h;
+    orbit.radius = aspect >= 1 ? 335 : Math.min(430, 250 / aspect);
+  }
+
   return {
-    start(stage) {
-      build(stage);
+    start(el) {
+      stage = el;
+      time = 0;
+      THREE.ColorManagement.legacyMode = false;   /* 16進カラーをsRGBとして正しく扱う */
+      engaged = false; clicked = false; pendingRelease = false;
+      pressId = null; drawId = null; orbitId = null;
+      plunger = U.spring(0);
+      refill = U.spring(0);
+      camAngle = 0; camTarget = 0;
+      maxDepth = 0; scratch = null; scratchLevel = 0;
+      springLenShown = -1; springMesh = null;
+      penPose = 'home';
+      drawPoint = new THREE.Vector3();
+      lastUV = null;
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      stage.appendChild(renderer.domElement);
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(32, 1, 1, 3000);
+      orbit = { az: 0.5, po: 1.15, radius: 250, target: new THREE.Vector3(34, 48, 0) };
+
+      materialsRef = makeMaterials();
+      buildScene();
+      buildPen(materialsRef);
+      updateSpring();
+
+      resizeHandler = () => resize();
+      window.addEventListener('resize', resizeHandler);
+      resize();
+
+      renderer.domElement.addEventListener('pointerdown', onDown);
+      renderer.domElement.addEventListener('pointermove', onMove);
+      renderer.domElement.addEventListener('pointerup', onUp);
+      renderer.domElement.addEventListener('pointercancel', onUp);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
+
     stop() {
       cancelAnimationFrame(raf);
+      scratchStop();
+      window.removeEventListener('resize', resizeHandler);
+      scene.traverse(o => {
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) {
+          const ms = Array.isArray(o.material) ? o.material : [o.material];
+          ms.forEach(m => {
+            for (const key in m) {
+              if (m[key] && m[key].isTexture) m[key].dispose();
+            }
+            m.dispose();
+          });
+        }
+      });
+      if (scene.background && scene.background.isTexture) scene.background.dispose();
+      if (scene.environment) scene.environment.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+      renderer = null;
+      scene = null;
     },
   };
 })();
