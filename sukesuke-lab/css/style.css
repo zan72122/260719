@@ -1,0 +1,126 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  font-family: "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", "BIZ UDGothic", sans-serif;
+  background: linear-gradient(160deg, #bfe9ff 0%, #e8f7ff 45%, #ffe9f6 100%);
+}
+
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- home ---------- */
+
+#title {
+  font-size: clamp(28px, 6vmin, 64px);
+  color: #3b6ea5;
+  margin-bottom: 4vmin;
+  letter-spacing: 0.06em;
+  text-shadow: 0 4px 0 rgba(255, 255, 255, 0.9);
+}
+
+#title span {
+  display: inline-block;
+  animation: bounce 1.8s ease-in-out infinite;
+}
+
+#title span:nth-child(2n)  { animation-delay: 0.12s; color: #ff7ab6; }
+#title span:nth-child(3n)  { animation-delay: 0.24s; color: #ff9f43; }
+#title span:nth-child(4n)  { animation-delay: 0.36s; color: #35c46f; }
+#title span:nth-child(5n)  { animation-delay: 0.48s; color: #8f6bff; }
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-0.35em); }
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3.2vmin;
+  width: min(88vw, 92vh);
+}
+
+@media (orientation: landscape) {
+  .cards { grid-template-columns: repeat(4, 1fr); width: min(94vw, 170vh); }
+}
+
+.card {
+  border: none;
+  border-radius: 4vmin;
+  padding: 3.4vmin 1vmin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4vmin;
+  cursor: pointer;
+  box-shadow: 0 1.2vmin 0 rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.card:active {
+  transform: translateY(0.8vmin) scale(0.96);
+  box-shadow: 0 0.3vmin 0 rgba(0, 0, 0, 0.12);
+}
+
+.card .icon  { font-size: clamp(44px, 11vmin, 120px); line-height: 1.1; }
+.card .label {
+  font-size: clamp(18px, 4vmin, 40px);
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+}
+
+.card-pen      { background: linear-gradient(160deg, #7fd0ff, #4aa9ee); }
+.card-pump     { background: linear-gradient(160deg, #ffa9d2, #ff6fae); }
+.card-umbrella { background: linear-gradient(160deg, #b79bff, #8f6bff); }
+.card-dryer    { background: linear-gradient(160deg, #ffc46b, #ff9f43); }
+
+/* ---------- game ---------- */
+
+#game { background: transparent; }
+
+#stage, #stage svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+#homeBtn {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  z-index: 10;
+  width: clamp(52px, 9vmin, 84px);
+  height: clamp(52px, 9vmin, 84px);
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.15);
+  font-size: clamp(26px, 4.6vmin, 44px);
+  cursor: pointer;
+}
+
+#homeBtn:active { transform: scale(0.9); }
