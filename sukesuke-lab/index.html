@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>スケスケなかみランド</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="home" class="screen">
+  <h1 id="title">
+    <span>ス</span><span>ケ</span><span>ス</span><span>ケ</span><span>な</span><span>か</span><span>み</span><span>ラ</span><span>ン</span><span>ド</span>
+  </h1>
+  <div class="cards">
+    <button class="card card-pen" data-game="pen">
+      <span class="icon">🖊️</span>
+      <span class="label">ぺん</span>
+    </button>
+    <button class="card card-pump" data-game="pump">
+      <span class="icon">🧴</span>
+      <span class="label">ぽんぷ</span>
+    </button>
+    <button class="card card-umbrella" data-game="umbrella">
+      <span class="icon">☂️</span>
+      <span class="label">かさ</span>
+    </button>
+    <button class="card card-dryer" data-game="dryer">
+      <span class="icon">💨</span>
+      <span class="label">どらいやー</span>
+    </button>
+  </div>
+</div>
+
+<div id="game" class="screen hidden">
+  <button id="homeBtn" aria-label="ホームへもどる">🏠</button>
+  <div id="stage"></div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/pen.js"></script>
+<script src="js/pump.js"></script>
+<script src="js/umbrella.js"></script>
+<script src="js/dryer.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
