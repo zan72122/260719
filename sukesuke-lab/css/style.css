@@ -15,7 +15,7 @@ html, body {
   position: fixed;
   touch-action: none;
   font-family: "Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", "BIZ UDGothic", sans-serif;
-  background: linear-gradient(160deg, #bfe9ff 0%, #e8f7ff 45%, #ffe9f6 100%);
+  background: linear-gradient(170deg, #f2efe9 0%, #e3ded4 55%, #c8c1b3 100%);
 }
 
 .screen {
@@ -32,27 +32,14 @@ html, body {
 /* ---------- home ---------- */
 
 #title {
-  font-size: clamp(28px, 6vmin, 64px);
-  color: #3b6ea5;
+  font-size: clamp(26px, 5vmin, 56px);
+  color: #43484f;
   margin-bottom: 4vmin;
-  letter-spacing: 0.06em;
-  text-shadow: 0 4px 0 rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.1em;
+  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.8);
 }
 
-#title span {
-  display: inline-block;
-  animation: bounce 1.8s ease-in-out infinite;
-}
-
-#title span:nth-child(2n)  { animation-delay: 0.12s; color: #ff7ab6; }
-#title span:nth-child(3n)  { animation-delay: 0.24s; color: #ff9f43; }
-#title span:nth-child(4n)  { animation-delay: 0.36s; color: #35c46f; }
-#title span:nth-child(5n)  { animation-delay: 0.48s; color: #8f6bff; }
-
-@keyframes bounce {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-0.35em); }
-}
+#title span { display: inline-block; }
 
 .cards {
   display: grid;
@@ -67,34 +54,38 @@ html, body {
 
 .card {
   border: none;
-  border-radius: 4vmin;
-  padding: 3.4vmin 1vmin;
+  border-radius: 2.6vmin;
+  padding: 1.2vmin;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.4vmin;
+  gap: 1vmin;
   cursor: pointer;
-  box-shadow: 0 1.2vmin 0 rgba(0, 0, 0, 0.12);
+  background: #fdfdfb;
+  box-shadow: 0 1vmin 2.4vmin rgba(50, 44, 32, 0.22);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .card:active {
-  transform: translateY(0.8vmin) scale(0.96);
-  box-shadow: 0 0.3vmin 0 rgba(0, 0, 0, 0.12);
+  transform: translateY(0.5vmin) scale(0.97);
+  box-shadow: 0 0.3vmin 1vmin rgba(50, 44, 32, 0.22);
 }
 
-.card .icon  { font-size: clamp(44px, 11vmin, 120px); line-height: 1.1; }
+.card .thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 1.8vmin;
+  background-size: cover;
+  background-position: center;
+}
+
 .card .label {
-  font-size: clamp(18px, 4vmin, 40px);
+  font-size: clamp(17px, 3.4vmin, 34px);
   font-weight: bold;
-  color: #fff;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+  color: #4a4f57;
+  padding-bottom: 0.6vmin;
 }
-
-.card-pen      { background: linear-gradient(160deg, #7fd0ff, #4aa9ee); }
-.card-pump     { background: linear-gradient(160deg, #ffa9d2, #ff6fae); }
-.card-umbrella { background: linear-gradient(160deg, #b79bff, #8f6bff); }
-.card-dryer    { background: linear-gradient(160deg, #ffc46b, #ff9f43); }
 
 /* ---------- game ---------- */
 

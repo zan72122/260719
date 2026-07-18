@@ -179,6 +179,98 @@ const S = (() => {
       this.clickReal(0.75, 0.05);
     },
 
+    /* ポンプを押すときの実物風スクイズ音 */
+    squishReal(vol) {
+      vol = vol == null ? 1 : vol;
+      hiss(0.22, 0.1 * vol, 420);
+      blip('sine', 150, 62, 0.22, 0.2 * vol);
+    },
+
+    /* 液体を吸い上げるゴボッという音 */
+    glug() {
+      blip('sine', 260, 110, 0.12, 0.22);
+      blip('sine', 200, 85, 0.14, 0.2, 0.11);
+      hiss(0.28, 0.05, 700, 0.03);
+    },
+
+    /* 小さな液だまりに落ちるピチャ */
+    plip() {
+      blip('sine', 950, 320, 0.05, 0.12);
+      hiss(0.05, 0.04, 2600, 0.01);
+    },
+
+    /* 低いコトッという着座音 */
+    thunk() {
+      blip('sine', 190, 70, 0.07, 0.3);
+      hiss(0.04, 0.12, 900);
+    },
+
+    /* 布がはためくバサッ */
+    flap() {
+      hiss(0.22, 0.22, 850);
+      hiss(0.14, 0.14, 500, 0.1);
+    },
+
+    /* 雨の環境音ループ。set(0〜1)、stop() */
+    rainLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 5200;
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          g.gain.setTargetAtTime(level * 0.055, c.currentTime, 0.3);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.1);
+          try { src.stop(c.currentTime + 0.5); } catch (e) { /* stopped */ }
+        },
+      };
+    },
+
+    /* モーターのうなりループ。set(0〜1)、stop() */
+    humLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = 82;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 260;
+      const g = c.createGain();
+      g.gain.value = 0;
+      o.connect(f).connect(g).connect(c.destination);
+      o.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          const t = c.currentTime;
+          g.gain.setTargetAtTime(level * 0.05, t, 0.1);
+          o.frequency.setTargetAtTime(82 + level * 46, t, 0.1);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.08);
+          try { o.stop(c.currentTime + 0.4); } catch (e) { /* stopped */ }
+        },
+      };
+    },
+
     /* ボールペンが紙をこする音。set(0〜1)で速さ、stop()で終了 */
     scratchLoop() {
       const c = ac();

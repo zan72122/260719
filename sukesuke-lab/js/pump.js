@@ -1,373 +1,343 @@
-/* 石けんポンプの中身 */
+/* 石けんポンプの中身 — 写実3D版 (Three.js)
+ *
+ * 透明ボトルのソープディスペンサー。中の機構は実物準拠:
+ *   ヘッドを押す → ピストンが下がりチャンバーを加圧 → 吐出弁ボールが開いて
+ *   ノズルから石けんが出る → 離すとバネで戻り、吸入弁ボールが開いて
+ *   吸い上げ管から液がチャンバーへ補充される (ボトルの液面が下がる)
+ * 単位は mm。ボトル中心軸がローカル原点。
+ */
 window.GAMES.pump = (() => {
-  const MODES = {
-    sara: { label: 'さらさら', icon: '💧', liquid: '#7bed9f', deep: '#35c46f', interval: 0.05, g: 1800, vx: 380, r: 9,  use: 0.025, foam: false },
-    toro: { label: 'とろとろ', icon: '🍯', liquid: '#ffb8d9', deep: '#ff6fae', interval: 0.3,  g: 500,  vx: 205, r: 21, use: 0.13,  foam: false },
-    awa:  { label: 'あわあわ', icon: '🫧', liquid: '#a8dcff', deep: '#5ab7f0', interval: 0.1,  g: 300,  vx: 165, r: 15, use: 0.045, foam: true },
-  };
+  const STROKE_MAX = 12;    // ヘッドの最大押し込み量
+  const EXIT = { x: 48, y: 167 };   // ノズル開口 (ヘッド静止時)
 
-  let svg, raf, prev, fx, dom, time;
-  let mode, stroke, pressing;
-  let level, chamberFill, inletOpen, flapOpen;
-  let drops, pile, sparks, dirt;
-  let emitTimer, suckSndT, gagT, cleanCelebT, pouringT, refillShown, emitSndN;
+  let stage3, scene, raf, prev, time;
+  let headG, piston, springCtl, inletBall, outletBall, liquidMesh, flowDots;
+  let headHit, dishPos;
+  let stroke, pressing, pressId, pressY0, orbitId, orbitFrom;
+  let level, charge, emitT, suckPlayed, inletOpen, outletOpen;
+  let blobs, pile, splats, liquidMat;
+  let mats;
 
-  function build(stage) {
-    svg = U.makeSvg(stage, 1000, 1000);
-    mode = 'sara';
-    stroke = U.spring(0);
-    pressing = false;
-    level = 1; chamberFill = 1; inletOpen = 0; flapOpen = 0;
-    drops = []; pile = []; sparks = [];
-    emitTimer = 0; suckSndT = 0; gagT = 0; cleanCelebT = 0; pouringT = 0; refillShown = false; emitSndN = 0;
-    time = 0;
-    dom = {};
+  /* ---------------- 質感 ---------------- */
 
-    /* ---- 手（よごれつき） ---- */
-    const hand = U.el('g', {}, svg);
-    const skin = '#ffd9b8', skinLine = '#eab98d';
-    [706, 752, 798, 844].forEach((x, i) => {
-      U.el('rect', { x, y: 505 - (i === 1 || i === 2 ? 22 : 0), width: 40, height: 130, rx: 20, fill: skin, stroke: skinLine, 'stroke-width': 4 }, hand);
-    });
-    U.el('ellipse', { cx: 672, cy: 640, rx: 30, ry: 52, transform: 'rotate(30 672 640)', fill: skin, stroke: skinLine, 'stroke-width': 4 }, hand);
-    U.el('ellipse', { cx: 795, cy: 655, rx: 112, ry: 95, fill: skin, stroke: skinLine, 'stroke-width': 5 }, hand);
-    dom.handEyeL = U.text('•', { x: 765, y: 655, 'text-anchor': 'middle', 'font-size': 30, fill: '#8a5a3a' }, hand);
-    dom.handEyeR = U.text('•', { x: 825, y: 655, 'text-anchor': 'middle', 'font-size': 30, fill: '#8a5a3a' }, hand);
-    dom.handMouth = U.el('path', { d: 'M 775 675 Q 795 688 815 675', fill: 'none', stroke: '#8a5a3a', 'stroke-width': 4, 'stroke-linecap': 'round' }, hand);
-
-    dirt = [];
-    [[740, 590], [850, 605], [790, 705], [722, 668], [862, 668]].forEach(([x, y]) => {
-      const el = U.el('ellipse', { cx: x, cy: y, rx: U.rand(15, 22), ry: U.rand(12, 17), fill: '#a67c52', opacity: 0.9, transform: `rotate(${U.rand(-30, 30)} ${x} ${y})` }, hand);
-      dirt.push({ el, x, y, on: true, hp: 3 });
-    });
-
-    /* あわの山 */
-    dom.pileG = U.el('g', {}, svg);
-
-    /* ---- ボトル ---- */
-    dom.liquid = U.el('rect', { x: 188, y: 450, width: 284, height: 382, rx: 28, fill: MODES.sara.liquid, opacity: 0.75 }, svg);
-    dom.tubeLiquid = U.el('rect', { x: 320, y: 368, width: 20, height: 428, fill: MODES.sara.deep, opacity: 0.8 }, svg);
-    U.el('rect', { x: 180, y: 420, width: 300, height: 420, rx: 40, fill: '#dff2ff', opacity: 0.3, stroke: '#7fc4e8', 'stroke-width': 6 }, svg);
-    U.el('rect', { x: 196, y: 445, width: 20, height: 180, rx: 10, fill: '#ffffff', opacity: 0.5 }, svg);
-    U.el('rect', { x: 290, y: 360, width: 80, height: 66, fill: '#dff2ff', opacity: 0.35, stroke: '#7fc4e8', 'stroke-width': 6 }, svg);
-    /* すいこみパイプ */
-    U.el('rect', { x: 314, y: 360, width: 32, height: 440, rx: 10, fill: 'none', stroke: '#9fd6f2', 'stroke-width': 5 }, svg);
-    /* すいこみ弁（赤いボール） */
-    U.el('path', { d: 'M 306 404 L 322 392 M 354 404 L 338 392', stroke: '#7fc4e8', 'stroke-width': 5, 'stroke-linecap': 'round' }, svg);
-    dom.inletBall = U.el('circle', { cx: 330, cy: 388, r: 16, fill: '#ff6b6b', stroke: '#e05555', 'stroke-width': 4 }, svg);
-
-    /* シリンダー */
-    U.el('rect', { x: 292, y: 250, width: 76, height: 112, rx: 10, fill: '#dff2ff', opacity: 0.35, stroke: '#7fc4e8', 'stroke-width': 6 }, svg);
-    dom.chamberLiquid = U.el('rect', { x: 298, y: 300, width: 64, height: 58, fill: MODES.sara.liquid, opacity: 0.85 }, svg);
-
-    /* ---- 動くヘッド ---- */
-    dom.head = U.el('g', {}, svg);
-    U.el('rect', { x: 316, y: 226, width: 28, height: 48, fill: '#cbd6e0', stroke: '#9aa7b8', 'stroke-width': 4 }, dom.head);
-    dom.piston = U.el('rect', { x: 296, y: 258, width: 68, height: 24, rx: 8, fill: '#8f6bff', stroke: '#7052d6', 'stroke-width': 4 }, dom.head);
-    /* ノズル */
-    U.el('rect', { x: 400, y: 172, width: 160, height: 36, rx: 14, fill: '#ffb8d9', stroke: '#ff8fc0', 'stroke-width': 5 }, dom.head);
-    U.el('rect', { x: 532, y: 172, width: 46, height: 78, rx: 16, fill: '#ffb8d9', stroke: '#ff8fc0', 'stroke-width': 5 }, dom.head);
-    /* おしだし弁（みどりのフタ） */
-    dom.flap = U.el('rect', { x: 404, y: 178, width: 12, height: 40, rx: 6, fill: '#4cd137', stroke: '#38a52a', 'stroke-width': 3 }, dom.head);
-    /* おすところ */
-    U.el('rect', { x: 240, y: 150, width: 180, height: 84, rx: 26, fill: '#ff8fc0', stroke: '#ff6fae', 'stroke-width': 6 }, dom.head);
-    U.el('rect', { x: 258, y: 164, width: 60, height: 18, rx: 9, fill: '#ffffff', opacity: 0.55 }, dom.head);
-    U.text('👇', { x: 330, y: 140, 'text-anchor': 'middle', 'font-size': 40 }, dom.head);
-
-    /* つめかえボタン */
-    dom.refillBtn = U.el('g', { opacity: 0 }, svg);
-    U.el('circle', { cx: 110, cy: 300, r: 62, fill: '#ffe9a8', stroke: '#f5c542', 'stroke-width': 6 }, dom.refillBtn);
-    U.text('🫗', { x: 110, y: 320, 'text-anchor': 'middle', 'font-size': 58 }, dom.refillBtn);
-    /* そそぎこみのながれ */
-    dom.pourStream = U.el('rect', { x: 320, y: 40, width: 20, height: 390, rx: 10, fill: MODES.sara.deep, opacity: 0 }, svg);
-
-    /* ---- モードボタン ---- */
-    dom.modeBtns = {};
-    let bx = 55;
-    for (const key of Object.keys(MODES)) {
-      const m = MODES[key];
-      const g = U.el('g', { 'data-mode': key }, svg);
-      const r = U.el('rect', { x: bx, y: 872, width: 280, height: 104, rx: 30, fill: m.liquid, stroke: m.deep, 'stroke-width': 5 }, g);
-      U.text(m.icon, { x: bx + 52, y: 942, 'text-anchor': 'middle', 'font-size': 46 }, g);
-      U.text(m.label, { x: bx + 168, y: 940, 'text-anchor': 'middle', 'font-size': 42, fill: '#ffffff', style: 'paint-order:stroke', stroke: m.deep, 'stroke-width': 5 }, g);
-      dom.modeBtns[key] = { g, r };
-      bx += 305;
+  function counterTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 512;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#dfdfda';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 14000; i++) {
+      const v = (180 + Math.random() * 50) | 0;
+      ctx.fillStyle = `rgba(${v},${v},${v - 4},0.5)`;
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.6, 1.6);
     }
-
-    dom.dropsG = U.el('g', {}, svg);
-    dom.sparksG = U.el('g', {}, svg);
-    fx = makeFxLayer(svg);
-
-    setMode('sara');
-    svg.addEventListener('pointerdown', onDown);
-    svg.addEventListener('pointerup', onUp);
-    svg.addEventListener('pointercancel', onUp);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
   }
 
-  function setMode(key) {
-    mode = key;
-    const m = MODES[key];
-    dom.liquid.setAttribute('fill', m.liquid);
-    dom.tubeLiquid.setAttribute('fill', m.deep);
-    dom.chamberLiquid.setAttribute('fill', m.liquid);
-    dom.pourStream.setAttribute('fill', m.deep);
-    for (const k in dom.modeBtns) {
-      dom.modeBtns[k].r.setAttribute('stroke-width', k === key ? 10 : 5);
-      dom.modeBtns[k].g.setAttribute('transform', k === key ? 'translate(0 -10)' : '');
+  /* ---------------- 組み立て ---------------- */
+
+  function build() {
+    const s = stage3;
+    scene = s.scene;
+    mats = G3.materials();
+
+    /* 濃い蜂蜜状の液。透明ボトルの transmission 越しに見えるよう不透明にする
+       (three.js の transmission パスは他の透過マテリアルを映さないため) */
+    liquidMat = new THREE.MeshPhysicalMaterial({
+      color: 0xc97a10, metalness: 0, roughness: 0.18,
+      clearcoat: 0.7, clearcoatRoughness: 0.2, envMapIntensity: 0.5,
+    });
+
+    /* 洗面カウンター */
+    const counter = new THREE.Mesh(
+      new THREE.PlaneGeometry(2400, 2400),
+      new THREE.MeshStandardMaterial({ map: counterTexture(), roughness: 0.4 })
+    );
+    counter.rotation.x = -Math.PI / 2;
+    counter.receiveShadow = true;
+    scene.add(counter);
+
+    scene.background = G3.bgGradient('#eef3f6', '#dde6ec', '#b9c4cd');
+    G3.addLights(scene, { pos: new THREE.Vector3(300, 620, 420), shadowSpan: 320 });
+
+    /* --- ボトルの液体 (先に描いてボトル越しに見せる) --- */
+    liquidMesh = new THREE.Mesh(new THREE.CylinderGeometry(27.5, 27.5, 1, 32), liquidMat);
+    scene.add(liquidMesh);
+
+    /* --- 吸い上げ管と吸入弁 ---
+       ボトル(transmission)越しに見えるよう、内部の部品はすべて不透明にする */
+    const tubeMat = new THREE.MeshStandardMaterial({ color: 0xeeece2, roughness: 0.5, envMapIntensity: 0.4 });
+    G3.add(scene, new THREE.CylinderGeometry(3, 3, 112, 16), tubeMat, 0, 64, 0);
+    /* チャンバーは上下のリングで輪郭だけ示し、中のピストンとバネを見せる */
+    G3.add(scene, new THREE.CylinderGeometry(8.6, 8.6, 3, 24, 1, true), tubeMat, 0, 119, 0);
+    G3.add(scene, new THREE.CylinderGeometry(8.6, 8.6, 3, 24, 1, true), tubeMat, 0, 152, 0);
+    inletBall = G3.add(scene, new THREE.SphereGeometry(3.5, 20, 14), mats.steel, 0, 123, 0);
+
+    /* チャンバー内のバネ */
+    springCtl = G3.springMesh(scene, mats.steel, 6, 5, 0.5);
+
+    /* すいこみ中に管をのぼる液 (管を包むふくらみとして見せる) */
+    flowDots = [];
+    for (let i = 0; i < 4; i++) {
+      const d = G3.add(scene, new THREE.SphereGeometry(4.3, 14, 10), liquidMat, 0, 20 + i * 26, 0);
+      d.scale.set(1, 1.6, 1);
+      d.visible = false;
+      flowDots.push(d);
     }
+
+    /* --- 透明ボトル --- */
+    G3.add(scene, new THREE.CylinderGeometry(30, 30, 110, 48, 1, true), mats.glass, 0, 59, 0);
+    G3.add(scene, new THREE.CylinderGeometry(29.5, 29.5, 4, 48), mats.glass, 0, 2, 0);
+    G3.add(scene, new THREE.CylinderGeometry(11, 30, 20, 48, 1, true), mats.glass, 0, 124, 0);
+    G3.add(scene, new THREE.CylinderGeometry(11, 11, 12, 32, 1, true), mats.glass, 0, 140, 0);
+    /* 白いキャップ (ねじ込みカラー) */
+    G3.add(scene, new THREE.CylinderGeometry(13, 13, 12, 32), mats.whitePlastic, 0, 152, 0);
+
+    /* --- 動くヘッド (透明で中の弁が見える) --- */
+    headG = new THREE.Group();
+    scene.add(headG);
+    piston = G3.add(headG, new THREE.CylinderGeometry(7, 7, 5, 24), mats.darkPlastic, 0, 149, 0);
+    G3.add(headG, new THREE.CylinderGeometry(2.5, 2.5, 17, 16), mats.whitePlastic, 0, 159.5, 0);
+    G3.add(headG, new THREE.CylinderGeometry(14, 14, 18, 32), mats.glass, 0, 177, 0);
+    /* ノズルアーム (横向きの透明管) */
+    const arm = G3.add(headG, new THREE.CylinderGeometry(5.5, 5.5, 42, 24), mats.glass, 29, 178, 0);
+    arm.rotation.z = Math.PI / 2;
+    G3.add(headG, new THREE.CylinderGeometry(4.5, 4, 10, 20), mats.glass, 48, 172, 0);
+    /* 吐出弁ボール (押すと開く) */
+    outletBall = G3.add(headG, new THREE.SphereGeometry(2.5, 16, 12), mats.steel, 12, 178, 0);
+
+    /* ヘッドのあたり判定 (大きめ・不可視) */
+    headHit = new THREE.Mesh(
+      new THREE.CylinderGeometry(30, 30, 64, 12),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    headHit.position.y = 178;
+    headG.add(headHit);
+
+    /* --- 石けんを受ける白い陶器の皿 --- */
+    dishPos = new THREE.Vector3(54, 0, 0);
+    const dish = G3.add(scene, new THREE.CylinderGeometry(21, 17, 5, 36), mats.ceramic, dishPos.x, 2.5, dishPos.z);
+    dish.receiveShadow = true;
+    const dishIn = G3.add(scene, new THREE.CylinderGeometry(17.5, 17.5, 1.2, 36),
+      new THREE.MeshPhysicalMaterial({ color: 0xe9e7e0, roughness: 0.2, clearcoat: 0.8 }), dishPos.x, 5.1, dishPos.z);
+    dishIn.receiveShadow = true;
   }
+
+  /* ---------------- 入力 ---------------- */
 
   function onDown(e) {
-    const p = U.toView(svg, e.clientX, e.clientY);
-
-    /* モードきりかえ */
-    if (p.y > 850) {
-      const idx = Math.floor((p.x - 55) / 305);
-      const keys = Object.keys(MODES);
-      if (idx >= 0 && idx < keys.length) {
-        setMode(keys[idx]);
-        S.blub();
-        S.sparkle();
+    const ray = stage3.setRay(e);
+    if (pressId === null) {
+      const hit = ray.intersectObject(headHit, false);
+      if (hit.length) {
+        pressId = e.pointerId;
+        pressY0 = e.clientY;
+        pressing = true;
+        stroke.t = STROKE_MAX;   /* タップでも必ず押し切れる */
+        S.squishReal(1);
+        return;
       }
-      return;
     }
-
-    /* つめかえ */
-    if (refillShown && Math.hypot(p.x - 110, p.y - 300) < 72) {
-      refillShown = false;
-      dom.refillBtn.setAttribute('opacity', 0);
-      pouringT = 1.6;
-      S.blub();
-      return;
-    }
-
-    /* ポンプヘッド */
-    if (p.x > 220 && p.x < 600 && p.y > 110 && p.y < 320) {
-      pressing = true;
-      stroke.t = 1;
-      if (level <= 0.02 && chamberFill <= 0.02) {
-        S.empty();
-        fx.puff(560, 250, '#e8f4ff', 4);
-      } else {
-        S.squish();
-      }
+    if (orbitId === null) {
+      orbitId = e.pointerId;
+      orbitFrom = { x: e.clientX, y: e.clientY, az: stage3.orbit.az, po: stage3.orbit.po };
     }
   }
 
-  function onUp() {
-    if (pressing) {
+  function onMove(e) {
+    if (e.pointerId === pressId) {
+      const r = stage3.renderer.domElement.getBoundingClientRect();
+      const dy = ((e.clientY - pressY0) / r.height) * 140;
+      stroke.t = U.clamp(STROKE_MAX + Math.min(0, dy), 0, STROKE_MAX);
+    } else if (e.pointerId === orbitId) {
+      stage3.orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.5, 1.25);
+      stage3.orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.72, 1.5);
+    }
+  }
+
+  function onUp(e) {
+    if (e.pointerId === pressId) {
+      pressId = null;
       pressing = false;
       stroke.t = 0;
+      suckPlayed = false;
+    } else if (e.pointerId === orbitId) {
+      orbitId = null;
     }
   }
 
-  function spawnDrop() {
-    const m = MODES[mode];
-    const sy = 252 + stroke.p * 70;
-    let el;
-    if (m.foam) {
-      el = U.el('g', {}, dom.dropsG);
-      for (let i = 0; i < 4; i++) {
-        U.el('circle', { cx: U.rand(-10, 10), cy: U.rand(-8, 8), r: U.rand(7, 12), fill: '#ffffff', stroke: '#bfe4ff', 'stroke-width': 2.5, opacity: 0.95 }, el);
-      }
-    } else {
-      el = U.el('circle', { r: m.r, fill: m.deep, opacity: 0.95 }, dom.dropsG);
-    }
-    drops.push({
-      el, x: 555, y: sy,
-      vx: m.vx * U.rand(0.85, 1.1),
-      vy: U.rand(10, 60),
-      g: m.g, r: m.r, foam: m.foam,
-    });
-    emitSndN++;
-    if (m.foam) { if (emitSndN % 2 === 0) S.pop(); }
-    else if (mode === 'toro') S.squish();
-    else if (emitSndN % 3 === 0) S.tick();
+  /* ---------------- 石けんの粒 ---------------- */
+
+  function spawnBlob() {
+    const r = U.rand(3.4, 5.4);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 18, 14), liquidMat);
+    m.castShadow = true;
+    m.position.set(EXIT.x + U.rand(-1, 1), EXIT.y - stroke.p, U.rand(-1, 1));
+    scene.add(m);
+    blobs.push({ m, r, vx: U.rand(2, 10), vy: -60, vz: U.rand(-4, 4) });
   }
 
-  function landDrop(d) {
-    const m = MODES[mode];
-    /* いちばん近いよごれをきれいに */
-    let best = null, bd = 1e9;
-    for (const s of dirt) {
-      if (!s.on) continue;
-      const dd = Math.hypot(s.x - d.x, s.y - d.y);
-      if (dd < bd) { bd = dd; best = s; }
-    }
-    if (best && bd < 160) {
-      best.hp--;
-      if (best.hp <= 0) {
-        best.on = false;
-        best.el.setAttribute('opacity', 0);
-        fx.burst(best.x, best.y, '#a7e8ff', 6, 10);
-        S.sparkle();
-        if (dirt.every(s => !s.on)) {
-          cleanCelebT = 1.6;
-          S.yay();
-          fx.burst(795, 640, '#ffd93b', 12);
-        }
-      } else {
-        best.el.setAttribute('opacity', (0.9 * best.hp / 3).toFixed(2));
-        fx.puff(best.x, best.y, '#e8f8ff', 2);
-      }
-    }
-    /* あわの山にたす */
-    const px = U.clamp(d.x + U.rand(-30, 30), 700, 890);
-    const py = 585 - pile.length * 7 + U.rand(-10, 10);
-    const el = U.el('circle', {
-      cx: px, cy: py, r: d.foam ? U.rand(12, 20) : U.rand(9, 15),
-      fill: '#ffffff', stroke: d.foam ? '#bfe4ff' : m.liquid, 'stroke-width': 3, opacity: 0.95,
-    }, dom.pileG);
-    pile.push({ el, x: px, y: py });
-    if (pile.length > 24 && gagT <= 0) {
-      gagT = 1.1;
-      S.wobble();
-    }
+  function landBlob(b) {
+    /* 皿の上に積もる。ぷにっと潰れる */
+    const px = U.clamp(b.m.position.x + U.rand(-11, 11), dishPos.x - 14, dishPos.x + 14);
+    const pz = U.clamp(b.m.position.z + U.rand(-11, 11), -14, 14);
+    b.m.position.set(px, 4.5 + pile.length * 1.9 + b.r * 0.5, pz);
+    b.m.scale.set(1.3, 0.5, 1.3);
+    pile.push({ m: b.m, life: 1 });
+    S.plip();
+    /* 積もりすぎた分は古いものから静かに沈んで消える */
+    if (pile.length > 30) pile[0].life = Math.min(pile[0].life, 0.35);
   }
+
+  /* ---------------- メインループ ---------------- */
 
   function loop(now) {
     const dt = Math.min((now - prev) / 1000, 0.033);
     prev = now;
     time += dt;
-    const m = MODES[mode];
 
-    U.stepSpring(stroke, dt, 260, 11);
-    fx.step(dt);
+    U.stepSpring(stroke, dt, 300, 22);   /* 実物のポンプらしい、ぬるっとしたストローク */
+    headG.position.y = -stroke.p;
 
-    const sPix = stroke.p * 70;
-    dom.head.setAttribute('transform', `translate(0 ${sPix.toFixed(1)})`);
-
-    /* 押し下げ → 石けんが出る */
-    let emitting = false;
-    if (stroke.v > 0.25 && stroke.p > 0.06 && chamberFill > 0) {
-      emitting = true;
-      emitTimer -= dt;
-      if (emitTimer <= 0) {
-        emitTimer = m.interval;
-        spawnDrop();
-        chamberFill = Math.max(0, chamberFill - m.use);
+    /* 押し下げ → 吐出 */
+    const pushing = stroke.v > 4 && stroke.p > 1;
+    if (pushing && charge > 0) {
+      emitT -= dt;
+      if (emitT <= 0) {
+        emitT = 0.07;
+        spawnBlob();
+        charge = Math.max(0, charge - 0.14);
       }
     }
-    flapOpen += ((emitting ? 1 : 0) - flapOpen) * Math.min(1, dt * 14);
-    dom.flap.setAttribute('transform', `rotate(${(-70 * flapOpen).toFixed(1)} 410 178)`);
+    outletOpen += ((pushing && charge > 0 ? 1 : 0) - outletOpen) * Math.min(1, dt * 14);
+    outletBall.position.x = 12 + outletOpen * 3.5;
 
-    /* 引き上げ → すいこむ */
-    let sucking = false;
-    if (stroke.v < -0.25 && level > 0 && chamberFill < 1) {
-      sucking = true;
-      chamberFill = Math.min(1, chamberFill + dt * 1.4);
-      level = Math.max(0, level - dt * 0.11);
-      suckSndT -= dt;
-      if (suckSndT <= 0) { suckSndT = 0.22; S.blub(); }
-      /* キラキラがパイプをのぼる */
-      if (Math.random() < 0.6) {
-        const el = U.el('path', { d: U.starPath(0, 0, U.rand(5, 9)), fill: '#ffffff', opacity: 0.95 }, dom.sparksG);
-        sparks.push({ el, x: U.rand(320, 340), y: U.rand(680, 790), vy: -U.rand(500, 750), life: U.rand(0.5, 0.75), age: 0 });
-      }
+    /* 戻り → 吸い上げ */
+    const sucking = stroke.v < -4 && charge < 1 && level > 0.15;
+    if (sucking) {
+      charge = Math.min(1, charge + dt * 1.7);
+      level = Math.max(0.15, level - dt * 0.02);
+      if (!suckPlayed) { suckPlayed = true; S.glug(); }
     }
     inletOpen += ((sucking ? 1 : 0) - inletOpen) * Math.min(1, dt * 12);
-    dom.inletBall.setAttribute('cy', (388 - inletOpen * 26).toFixed(1));
+    inletBall.position.y = 123 + inletOpen * 5;
 
-    if (level <= 0.02 && chamberFill <= 0.02 && !refillShown && pouringT <= 0) {
-      refillShown = true;
-      dom.refillBtn.setAttribute('opacity', 1);
-      S.empty();
-    }
-
-    /* つめかえ中 */
-    if (pouringT > 0) {
-      pouringT -= dt;
-      dom.pourStream.setAttribute('opacity', pouringT > 0.15 ? 0.9 : pouringT * 6);
-      level = Math.min(1, level + dt * 0.7);
-      if (Math.random() < 0.3) fx.burst(330, U.rand(430, 700), '#ffffff', 1, 8);
-      if (Math.random() < 0.12) S.blub();
-      if (pouringT <= 0) { S.sparkle(); dom.pourStream.setAttribute('opacity', 0); }
-    }
-
-    /* ボトルとシリンダーの液 */
-    const levelY = 830 - level * 375;
-    dom.liquid.setAttribute('y', levelY.toFixed(1));
-    dom.liquid.setAttribute('height', Math.max(2, 832 - levelY).toFixed(1));
-    dom.tubeLiquid.setAttribute('opacity', level > 0.04 ? 0.8 : 0.15);
-    const pistonBottom = 282 + sPix;
-    const chTop = Math.max(pistonBottom, 358 - chamberFill * 74);
-    dom.chamberLiquid.setAttribute('y', chTop.toFixed(1));
-    dom.chamberLiquid.setAttribute('height', Math.max(1, 358 - chTop).toFixed(1));
-
-    /* とんでいく石けん */
-    for (let i = drops.length - 1; i >= 0; i--) {
-      const d = drops[i];
-      d.vy += d.g * dt;
-      d.x += d.vx * dt;
-      d.y += d.vy * dt;
-      if (d.foam) {
-        d.el.setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.y.toFixed(1)}) rotate(${(d.x * 0.5).toFixed(0)})`);
-      } else {
-        const stretch = U.clamp(1 + d.vy / 2500, 1, 1.8);
-        d.el.setAttribute('transform', `translate(${d.x.toFixed(1)} ${d.y.toFixed(1)}) scale(1 ${stretch.toFixed(2)})`);
+    /* 管をのぼる液 */
+    flowDots.forEach((d, i) => {
+      d.visible = inletOpen > 0.25;
+      if (d.visible) {
+        let y = d.position.y + dt * 220;
+        if (y > 118) y = 16 + (i % 2) * 8;
+        d.position.y = y;
       }
-      if (d.y > 555 && d.x > 680 && d.x < 900) {
-        d.el.remove(); drops.splice(i, 1);
-        landDrop(d);
-      } else if (d.y > 970 || d.x > 1010) {
-        d.el.remove(); drops.splice(i, 1);
-        fx.puff(Math.min(d.x, 990), 960, '#ffffff', 3);
-        S.blub();
+    });
+
+    /* チャンバー内バネ: ピストンが下がると縮む */
+    springCtl.update(120, 26.5 - stroke.p);
+
+    /* ボトルの液面 */
+    liquidMesh.scale.y = level * 100;
+    liquidMesh.position.y = 5 + level * 50;
+
+    /* 落ちる石けん */
+    for (let i = blobs.length - 1; i >= 0; i--) {
+      const b = blobs[i];
+      b.vy -= 3000 * dt;
+      b.m.position.x += b.vx * dt;
+      b.m.position.y += b.vy * dt;
+      b.m.position.z += b.vz * dt;
+      /* 落下中はしずく形にのびる */
+      const st = U.clamp(1 - b.vy / 900, 1, 1.6);
+      b.m.scale.set(1 / Math.sqrt(st), st, 1 / Math.sqrt(st));
+      const p = b.m.position;
+      const overDish = Math.hypot(p.x - dishPos.x, p.z - dishPos.z) < 19;
+      if (overDish && p.y < 7 + pile.length * 1.9) {
+        blobs.splice(i, 1);
+        landBlob(b);
+      } else if (p.y < b.r * 0.4 + 1) {
+        /* カウンターに落ちたぶんは平たく残ってゆっくり消える */
+        blobs.splice(i, 1);
+        b.m.position.y = 1.2;
+        b.m.scale.set(1.9, 0.16, 1.9);
+        splats.push({ m: b.m, life: 4 });
+        S.plip();
       }
     }
 
-    /* パイプのキラキラ */
-    for (let i = sparks.length - 1; i >= 0; i--) {
-      const s = sparks[i];
-      s.age += dt;
-      if (s.age >= s.life) { s.el.remove(); sparks.splice(i, 1); continue; }
-      s.y += s.vy * dt;
-      s.el.setAttribute('transform', `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) rotate(${(s.age * 400).toFixed(0)})`);
-      s.el.setAttribute('opacity', (1 - s.age / s.life).toFixed(2));
-    }
-
-    /* あわの山もりもりギャグ */
-    if (gagT > 0) {
-      gagT -= dt;
-      dom.pileG.setAttribute('transform', `translate(${(Math.sin(time * 30) * 10 * gagT).toFixed(1)} 0)`);
-      if (gagT <= 0) {
-        pile.forEach(b => {
-          fx.burst(b.x, b.y, '#ffffff', 1, 10);
-          b.el.remove();
-        });
-        pile = [];
-        dom.pileG.setAttribute('transform', '');
-        S.sparkle();
-        S.pop();
-        S.pop(0.12);
+    /* 皿の上の石けん: 古いものから沈んで消える */
+    for (let i = pile.length - 1; i >= 0; i--) {
+      const q = pile[i];
+      if (q.life < 1) {
+        q.life -= dt * 0.5;
+        q.m.scale.multiplyScalar(Math.max(0.0001, 1 - dt * 1.2));
+        q.m.position.y -= dt * 3;
+        if (q.life <= 0) {
+          scene.remove(q.m);
+          q.m.geometry.dispose();
+          pile.splice(i, 1);
+          pile.forEach(o => { o.m.position.y = Math.max(4.5, o.m.position.y - 1.9); });
+        }
       }
     }
 
-    /* 手のかお */
-    if (cleanCelebT > 0) {
-      cleanCelebT -= dt;
-      dom.handEyeL.textContent = '＾'; dom.handEyeR.textContent = '＾';
-      dom.handMouth.setAttribute('d', 'M 772 672 Q 795 695 818 672');
-      if (cleanCelebT <= 0) {
-        dirt.forEach(s => { s.on = true; s.hp = 3; s.el.setAttribute('opacity', 0.9); });
-        S.blub();
+    /* カウンターの液だまり */
+    for (let i = splats.length - 1; i >= 0; i--) {
+      const q = splats[i];
+      q.life -= dt;
+      if (q.life < 1.2) {
+        q.m.scale.x *= 1 - dt * 0.3;
+        q.m.scale.z *= 1 - dt * 0.3;
+        q.m.scale.y *= 1 - dt * 0.6;
       }
-    } else {
-      dom.handEyeL.textContent = '•'; dom.handEyeR.textContent = '•';
-      dom.handMouth.setAttribute('d', 'M 775 675 Q 795 688 815 675');
+      if (q.life <= 0) {
+        scene.remove(q.m);
+        q.m.geometry.dispose();
+        splats.splice(i, 1);
+      }
     }
 
+    stage3.applyCamera();
+    stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
   }
 
+  /* ---------------- 起動と後始末 ---------------- */
+
   return {
-    start(stage) {
-      build(stage);
+    start(el) {
+      time = 0;
+      stroke = U.spring(0);
+      pressing = false; pressId = null; orbitId = null;
+      level = 0.8; charge = 1; emitT = 0; suckPlayed = false;
+      inletOpen = 0; outletOpen = 0;
+      blobs = []; pile = []; splats = [];
+
+      stage3 = G3.createStage(el, {
+        target: new THREE.Vector3(22, 88, 0),
+        radius: 400, radiusPortraitBase: 300, radiusMaxPortrait: 560,
+        az: 0.45, po: 1.2,
+      });
+      build();
+
+      const dom = stage3.renderer.domElement;
+      dom.addEventListener('pointerdown', onDown);
+      dom.addEventListener('pointermove', onMove);
+      dom.addEventListener('pointerup', onUp);
+      dom.addEventListener('pointercancel', onUp);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
+
     stop() {
       cancelAnimationFrame(raf);
+      stage3.dispose();
+      stage3 = null;
+      scene = null;
     },
   };
 })();
