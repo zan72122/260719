@@ -9,7 +9,7 @@
 window.GAMES.pen = (() => {
   const PRESS_MAX = 8;     // ノックの最大押し込み量
   const TIP_OUT = 5;       // 係合時に芯が繰り出される量
-  const CLICK_DEPTH = 6.8; // カムが回るストローク位置
+  const CLICK_DEPTH = 6;   // カムが回るストローク位置 (余裕をもたせる)
 
   let stage, renderer, scene, camera, raf, prev, time;
   let penRoot, plungerG, refillG, camG, springMesh, knockHit;
@@ -200,12 +200,12 @@ window.GAMES.pen = (() => {
     add(plungerG, new THREE.SphereGeometry(3.4, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mats.navy, 134);
     add(plungerG, new THREE.CylinderGeometry(2.7, 2.7, 16, 24), mats.pom, 115);
 
-    /* ノック用のあたり判定 (不可視・指サイズ) */
+    /* ノック用のあたり判定 (不可視・指よりだいぶ大きめ) */
     knockHit = new THREE.Mesh(
-      new THREE.CylinderGeometry(15, 15, 46, 12),
+      new THREE.CylinderGeometry(22, 22, 70, 12),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    knockHit.position.y = 124;
+    knockHit.position.y = 116;
     penRoot.add(knockHit);
 
     /* --- リフィル (芯) --- */
@@ -309,7 +309,8 @@ window.GAMES.pen = (() => {
         pressId = e.pointerId;
         pressY0 = e.clientY;
         maxDepth = 0;
-        plunger.t = PRESS_MAX;   /* タップだけでも押し切れる */
+        pendingRelease = false;
+        plunger.t = PRESS_MAX;   /* タップだけでも必ず押し切れる */
         return;
       }
     }
@@ -332,9 +333,11 @@ window.GAMES.pen = (() => {
 
   function onMove(e) {
     if (e.pointerId === pressId) {
+      /* 押している間はフルストロークが基準。
+         上へ引いた分だけ戻せる (指の微ブレでは絶対に失敗しない) */
       const r = renderer.domElement.getBoundingClientRect();
-      const extra = ((e.clientY - pressY0) / r.height) * 95;
-      plunger.t = U.clamp(PRESS_MAX * 0.85 + extra, 0, PRESS_MAX);
+      const dy = ((e.clientY - pressY0) / r.height) * 95;
+      plunger.t = U.clamp(PRESS_MAX + Math.min(0, dy), 0, PRESS_MAX);
     } else if (e.pointerId === drawId) {
       raycaster.setFromCamera(pointerNDC(e), camera);
       const hit = raycaster.intersectObject(paperMesh, false);
@@ -409,7 +412,7 @@ window.GAMES.pen = (() => {
     /* ノック: 押し込みは機械的に固く、戻りはバネらしく */
     U.stepSpring(plunger, dt, 1600, 34);
     /* 最下点付近でカムが1歯回る (押し行程) */
-    if (plunger.p >= CLICK_DEPTH && plunger.v > 0 && !clicked) {
+    if (plunger.p >= CLICK_DEPTH && !clicked) {
       clicked = true;
       camTarget += Math.PI / 3;   /* 60度 = 1歯ぶん */
       S.clickReal(1);
