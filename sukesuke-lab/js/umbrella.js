@@ -1,331 +1,449 @@
-/* 傘の中身 */
+/* 傘の中身 — 写実3D版 (Three.js)
+ *
+ * ワンタッチ開閉傘。透明シャフトの中のバネがランナーを押し上げて骨が開く。
+ * 外の結果: 雨がアスファルトをだんだん濡らして黒くしていくが、
+ * 開いた傘の下だけは乾いたまま丸く残る。強風で傘は本当に裏返る。
+ * 単位は mm。傘の石突き(接地点)がワールド原点。
+ */
 window.GAMES.umbrella = (() => {
-  const HUB = { x: 500, y: 230 };
-  const L = 310;                 // 骨のながさ
-  const PIVOT = { x: 500, y: 690 };
-  const CHICK = { x: 660, y: 852 };
-  const CLOUD = { x: 140, y: 130 };
+  const HUB_Y = 880;        // 骨の付け根 (上ろくろ) の高さ
+  const RIB_LEN = 560;      // 骨のながさ
+  const SECTORS = 8;        // 骨の本数
+  const ANG_SUB = 4;        // セクターあたりの角度分割
+  const RINGS = 8;          // 半径方向の分割
+  const DROPS = 260;
 
-  let svg, raf, prev, fx, dom, time;
-  let open, flip, tilt;          // バネアニメ
-  let wind, gustT, flipDelay;
-  let drops, tiltId, wetT, tickT, chickBounce;
+  let stage3, scene, raf, prev, time;
+  let umb, canopyMesh, canopyGeo, ribs, stretchers, runner, springCtl, btnHit, shaftHit;
+  let open, flip, tilt;
+  let openShown, thunked;
+  let rainPts, rainPos, rainVel, groundTex, groundCtx, dryFadeT;
+  let wind, gustT, nextGust, flipDelay;
+  let pressBtnCool, tiltId, tiltFrom, orbitId, orbitFrom;
+  let rainSnd, patterT;
+  let mats;
 
-  function build(stage) {
-    svg = U.makeSvg(stage, 1000, 1000);
-    open = U.spring(0);
-    flip = U.spring(0);
-    tilt = U.spring(0);
-    wind = 0; gustT = 0; flipDelay = -1;
-    drops = []; tiltId = null; wetT = 0; tickT = 0; chickBounce = 0;
-    time = 0;
-    dom = {};
+  /* ---------------- 地面 (濡れていくアスファルト) ---------------- */
 
-    const defs = U.el('defs', {}, svg);
-    const grad = U.el('linearGradient', { id: 'umbRainbow', x1: 0, y1: 0, x2: 1, y2: 0 }, defs);
-    [['0%', '#ff8fb5'], ['25%', '#ffc46b'], ['50%', '#ffe97a'], ['75%', '#8fe3a5'], ['100%', '#8fc6ff']].forEach(([o, c]) => {
-      U.el('stop', { offset: o, 'stop-color': c }, grad);
+  function asphaltCanvas() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 512;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#8d8d8a';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 26000; i++) {
+      const v = (95 + Math.random() * 80) | 0;
+      ctx.fillStyle = `rgba(${v},${v},${v - 3},0.6)`;
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.7, 1.7);
+    }
+    return { cv, ctx };
+  }
+
+  /* ---------------- かさ生地 (パラメトリック曲面) ---------------- */
+
+  function buildCanopyGeo() {
+    const around = SECTORS * ANG_SUB;
+    const verts = (around + 1) * (RINGS + 1);
+    const pos = new Float32Array(verts * 3);
+    const idx = [];
+    for (let j = 0; j < RINGS; j++) {
+      for (let i = 0; i < around; i++) {
+        const a = j * (around + 1) + i;
+        const b = a + around + 1;
+        idx.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    return geo;
+  }
+
+  function updateCanopy(alpha) {
+    const around = SECTORS * ANG_SUB;
+    const pos = canopyGeo.attributes.position.array;
+    let k = 0;
+    for (let j = 0; j <= RINGS; j++) {
+      const t = j / RINGS;
+      const rho = RIB_LEN * t;
+      /* 生地は骨よりわずかに浅い角度で張る (中央がふくらむ) */
+      const th = alpha * (0.78 + 0.22 * t);
+      for (let i = 0; i <= around; i++) {
+        const phi = (i / around) * Math.PI * 2;
+        /* 骨と骨のあいだで生地がたわむスカラップ */
+        const frac = (i % ANG_SUB) / ANG_SUB;
+        const sag = Math.sin(Math.PI * frac) * t * t;
+        const r = Math.sin(th) * rho * (1 - 0.045 * sag);
+        const y = HUB_Y - Math.cos(th) * rho + sag * 26 * Math.sign(Math.cos(th));
+        pos[k++] = Math.cos(phi) * r;
+        pos[k++] = y - sag * 22;
+        pos[k++] = Math.sin(phi) * r;
+      }
+    }
+    canopyGeo.attributes.position.needsUpdate = true;
+    canopyGeo.computeVertexNormals();
+  }
+
+  /* 骨とツユ先の位置 (updateCanopyと同じ角度定義) */
+  function ribTip(alpha, phi) {
+    return new THREE.Vector3(
+      Math.cos(phi) * Math.sin(alpha) * RIB_LEN,
+      HUB_Y - Math.cos(alpha) * RIB_LEN,
+      Math.sin(phi) * Math.sin(alpha) * RIB_LEN
+    );
+  }
+
+  function orientRod(mesh, from, to) {
+    const dir = to.clone().sub(from);
+    const len = dir.length();
+    mesh.position.copy(from).addScaledVector(dir, 0.5);
+    mesh.scale.set(1, len, 1);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  }
+
+  /* ---------------- 組み立て ---------------- */
+
+  function build() {
+    scene = stage3.scene;
+    mats = G3.materials();
+
+    /* 地面 */
+    const g = asphaltCanvas();
+    groundCtx = g.ctx;
+    groundTex = new THREE.CanvasTexture(g.cv);
+    groundTex.encoding = THREE.sRGBEncoding;
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(2400, 2400),
+      new THREE.MeshStandardMaterial({ map: groundTex, roughness: 0.85 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    scene.background = G3.bgGradient('#b9c2cb', '#a7b1bc', '#7d8894');
+    G3.addLights(scene, {
+      pos: new THREE.Vector3(900, 1700, 900), intensity: 0.72,
+      color: 0xe8eef4, sky: 0xb9c3cd, groundCol: 0x5c6167, hemi: 0.55, shadowSpan: 1400,
     });
 
-    /* じめん */
-    U.el('rect', { x: 0, y: 920, width: 1000, height: 80, fill: '#bfe8c8', opacity: 0.7 }, svg);
+    /* --- 傘ぜんたい (かたむけ用グループ) --- */
+    umb = new THREE.Group();
+    scene.add(umb);
 
-    /* くも（かぜボタン） */
-    dom.cloud = U.el('g', {}, svg);
-    U.el('ellipse', { cx: CLOUD.x, cy: CLOUD.y + 14, rx: 78, ry: 42, fill: '#eef6ff', stroke: '#c9dff2', 'stroke-width': 5 }, dom.cloud);
-    U.el('circle', { cx: CLOUD.x - 34, cy: CLOUD.y - 8, r: 36, fill: '#eef6ff', stroke: '#c9dff2', 'stroke-width': 5 }, dom.cloud);
-    U.el('circle', { cx: CLOUD.x + 26, cy: CLOUD.y - 16, r: 42, fill: '#eef6ff', stroke: '#c9dff2', 'stroke-width': 5 }, dom.cloud);
-    U.el('ellipse', { cx: CLOUD.x, cy: CLOUD.y + 12, rx: 76, ry: 40, fill: '#eef6ff' }, dom.cloud);
-    U.text('•', { x: CLOUD.x - 18, y: CLOUD.y + 12, 'text-anchor': 'middle', 'font-size': 26, fill: '#6b87a5' }, dom.cloud);
-    U.text('•', { x: CLOUD.x + 18, y: CLOUD.y + 12, 'text-anchor': 'middle', 'font-size': 26, fill: '#6b87a5' }, dom.cloud);
-    U.el('path', { d: `M ${CLOUD.x - 12} ${CLOUD.y + 26} Q ${CLOUD.x} ${CLOUD.y + 34} ${CLOUD.x + 12} ${CLOUD.y + 26}`, fill: 'none', stroke: '#6b87a5', 'stroke-width': 3.5, 'stroke-linecap': 'round' }, dom.cloud);
-    U.text('💨', { x: CLOUD.x + 78, y: CLOUD.y + 56, 'text-anchor': 'middle', 'font-size': 34 }, dom.cloud);
+    /* シャフト: 透明でバネが見える */
+    G3.add(umb, new THREE.CylinderGeometry(8, 8, 790, 24, 1, true), mats.glass, 0, 485, 0);
+    /* 石突きと持ち手 */
+    G3.add(umb, new THREE.CylinderGeometry(3, 6, 90, 16), mats.chrome, 0, 45, 0);
+    const hook = new THREE.Mesh(new THREE.TorusGeometry(50, 10, 14, 28, Math.PI), mats.darkPlastic);
+    hook.position.set(50, 92, 0);
+    hook.rotation.z = Math.PI;
+    hook.castShadow = true;
+    umb.add(hook);
+    G3.add(umb, new THREE.CylinderGeometry(10, 10, 40, 16), mats.darkPlastic, 100, 112, 0);
+    /* 上ろくろとトップ */
+    G3.add(umb, new THREE.CylinderGeometry(11, 11, 30, 20), mats.pom, 0, HUB_Y, 0);
+    G3.add(umb, new THREE.CylinderGeometry(4, 4, 90, 12), mats.chrome, 0, 930, 0);
+    G3.add(umb, new THREE.CylinderGeometry(0.8, 5, 26, 12), mats.chrome, 0, 988, 0);
 
-    /* ひよこ */
-    dom.chick = U.el('g', {}, svg);
-    U.el('ellipse', { cx: CHICK.x - 16, cy: CHICK.y + 44, rx: 14, ry: 7, fill: '#ff9f43' }, dom.chick);
-    U.el('ellipse', { cx: CHICK.x + 16, cy: CHICK.y + 44, rx: 14, ry: 7, fill: '#ff9f43' }, dom.chick);
-    U.el('circle', { cx: CHICK.x, cy: CHICK.y, r: 44, fill: '#ffd93b', stroke: '#f0b429', 'stroke-width': 4 }, dom.chick);
-    U.el('ellipse', { cx: CHICK.x + 26, cy: CHICK.y + 8, rx: 14, ry: 20, fill: '#ffcf1f' }, dom.chick);
-    dom.chickEyeL = U.text('•', { x: CHICK.x - 14, y: CHICK.y - 2, 'text-anchor': 'middle', 'font-size': 26, fill: '#5d4a1a' }, dom.chick);
-    dom.chickEyeR = U.text('•', { x: CHICK.x + 12, y: CHICK.y - 2, 'text-anchor': 'middle', 'font-size': 26, fill: '#5d4a1a' }, dom.chick);
-    U.el('path', { d: `M ${CHICK.x - 4} ${CHICK.y + 10} L ${CHICK.x + 12} ${CHICK.y + 16} L ${CHICK.x - 4} ${CHICK.y + 22} Z`, fill: '#ff9f43' }, dom.chick);
+    /* 開閉ボタン */
+    const btn = G3.add(umb, new THREE.CylinderGeometry(5.5, 5.5, 10, 16), mats.darkPlastic, 0, 228, 12);
+    btn.rotation.x = Math.PI / 2;
+    btnHit = new THREE.Mesh(new THREE.SphereGeometry(30, 8, 6), new THREE.MeshBasicMaterial({ visible: false }));
+    btnHit.position.set(0, 228, 8);
+    umb.add(btnHit);
+    /* シャフトのあたり判定 (かたむけ用・太め) */
+    shaftHit = new THREE.Mesh(
+      new THREE.CylinderGeometry(45, 45, 700, 8, 1, true),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    shaftHit.position.y = 500;
+    umb.add(shaftHit);
 
-    /* ---- かさ（かたむきグループ） ---- */
-    dom.umb = U.el('g', {}, svg);
+    /* ランナーとバネ */
+    runner = G3.add(umb, new THREE.CylinderGeometry(10.5, 10.5, 24, 20), mats.pom, 0, 430, 0);
+    G3.add(umb, new THREE.CylinderGeometry(10, 10, 8, 16), mats.chrome, 0, 296, 0); /* バネ受け */
+    springCtl = G3.springMesh(umb, mats.steel, 12, 11, 1.1);
 
-    /* え（棒）スケスケ */
-    U.el('rect', { x: 488, y: 226, width: 24, height: 534, rx: 10, fill: '#e8f4ff', opacity: 0.4, stroke: '#9fd6f2', 'stroke-width': 5 }, dom.umb);
-    U.el('path', { d: 'M 500 758 Q 500 812 452 812 Q 418 812 418 782', fill: 'none', stroke: '#8f6bff', 'stroke-width': 16, 'stroke-linecap': 'round' }, dom.umb);
-    U.el('circle', { cx: 500, cy: 214, r: 15, fill: '#ff9f43', stroke: '#e08a2e', 'stroke-width': 4 }, dom.umb);
+    /* かさ生地 */
+    canopyGeo = buildCanopyGeo();
+    canopyMesh = new THREE.Mesh(canopyGeo, new THREE.MeshPhysicalMaterial({
+      color: 0x8c1420, metalness: 0, roughness: 0.55,
+      clearcoat: 0.12, clearcoatRoughness: 0.5,
+      side: THREE.DoubleSide, envMapIntensity: 0.5,
+    }));
+    canopyMesh.castShadow = true;
+    umb.add(canopyMesh);
 
-    /* なかのばね と ランナー */
-    dom.spring = U.el('path', { fill: 'none', stroke: '#ff9f43', 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, dom.umb);
-    dom.runner = U.el('rect', { x: 480, y: 590, width: 40, height: 22, rx: 9, fill: '#ff6fae', stroke: '#e0559a', 'stroke-width': 4 }, dom.umb);
-    dom.stretchL = U.el('line', { stroke: '#b9a7ff', 'stroke-width': 8, 'stroke-linecap': 'round' }, dom.umb);
-    dom.stretchR = U.el('line', { stroke: '#b9a7ff', 'stroke-width': 8, 'stroke-linecap': 'round' }, dom.umb);
-
-    /* かさのぬの と ほね */
-    dom.canopy = U.el('path', { fill: 'url(#umbRainbow)', opacity: 0.78, stroke: '#8f6bff', 'stroke-width': 5, 'stroke-linejoin': 'round' }, dom.umb);
-    dom.ribs = U.el('g', { stroke: '#7a5ce0', 'stroke-width': 6, 'stroke-linecap': 'round', fill: 'none' }, dom.umb);
-    dom.ribL = U.el('line', {}, dom.ribs);
-    dom.ribR = U.el('line', {}, dom.ribs);
-    dom.ribML = U.el('line', { 'stroke-width': 4, opacity: 0.6 }, dom.ribs);
-    dom.ribMR = U.el('line', { 'stroke-width': 4, opacity: 0.6 }, dom.ribs);
-
-    /* ボタン */
-    dom.btn = U.el('g', {}, dom.umb);
-    U.el('circle', { cx: 500, cy: 655, r: 36, fill: '#ff6b6b', stroke: '#e05555', 'stroke-width': 6 }, dom.btn);
-    U.el('circle', { cx: 492, cy: 646, r: 9, fill: '#ffffff', opacity: 0.6 }, dom.btn);
-    dom.btnRing = U.el('circle', { cx: 500, cy: 655, r: 52, fill: 'none', stroke: '#ffd93b', 'stroke-width': 7, opacity: 0.5 }, dom.umb);
-
-    dom.dropsG = U.el('g', {}, svg);
-    fx = makeFxLayer(svg);
-
-    svg.addEventListener('pointerdown', onDown);
-    svg.addEventListener('pointermove', onMove);
-    svg.addEventListener('pointerup', onUp);
-    svg.addEventListener('pointercancel', onUp);
-  }
-
-  function toggleOpen() {
-    if (open.t < 0.5) {
-      open.t = 1;
-      S.kachi();
-      S.whoosh(0.8);
-      S.pop(0.25);
-    } else {
-      open.t = 0;
-      flip.t = 0;
-      S.kachi();
-      S.boing(240);
+    /* 骨と受け骨 */
+    ribs = [];
+    stretchers = [];
+    for (let i = 0; i < SECTORS; i++) {
+      const r = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 1, 8), mats.steel);
+      r.castShadow = true;
+      umb.add(r);
+      ribs.push(r);
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 1, 8), mats.steel);
+      st.castShadow = true;
+      umb.add(st);
+      stretchers.push(st);
     }
+
+    /* --- 雨 --- */
+    const spr = document.createElement('canvas');
+    spr.width = 10;
+    spr.height = 30;
+    const sctx = spr.getContext('2d');
+    const grad = sctx.createLinearGradient(0, 0, 0, 30);
+    grad.addColorStop(0, 'rgba(190,210,228,0)');
+    grad.addColorStop(0.5, 'rgba(190,210,228,0.85)');
+    grad.addColorStop(1, 'rgba(190,210,228,0.1)');
+    sctx.fillStyle = grad;
+    sctx.fillRect(3, 0, 4, 30);
+    const rainTex = new THREE.CanvasTexture(spr);
+    rainPos = new Float32Array(DROPS * 3);
+    rainVel = new Float32Array(DROPS * 2); /* vy, vx */
+    for (let i = 0; i < DROPS; i++) resetDrop(i, true);
+    const rainGeo = new THREE.BufferGeometry();
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+    rainPts = new THREE.Points(rainGeo, new THREE.PointsMaterial({
+      size: 26, map: rainTex, transparent: true, opacity: 0.5,
+      color: 0xcfe0ee, depthWrite: false, sizeAttenuation: true,
+    }));
+    scene.add(rainPts);
   }
 
-  function gust() {
-    wind = 560;
-    gustT = 1.2;
-    S.whoosh(1);
-    fx.puff(CLOUD.x + 90, CLOUD.y + 10, '#ffffff', 6);
-    if (open.p > 0.75 && flip.t < 0.5) flipDelay = 0.35;
+  function resetDrop(i, randomY) {
+    rainPos[i * 3] = U.rand(-1100, 1100);
+    rainPos[i * 3 + 1] = randomY ? U.rand(0, 1500) : U.rand(1350, 1550);
+    rainPos[i * 3 + 2] = U.rand(-1100, 1100);
+    rainVel[i * 2] = -U.rand(1150, 1500);
+    rainVel[i * 2 + 1] = 0;
   }
+
+  /* 地面をぬらす */
+  function wetGround(x, z) {
+    const u = ((x + 1200) / 2400) * 512;
+    const v = ((z + 1200) / 2400) * 512;
+    groundCtx.fillStyle = 'rgba(38,42,48,0.18)';
+    groundCtx.beginPath();
+    groundCtx.arc(u, v, U.rand(2.5, 4.5), 0, Math.PI * 2);
+    groundCtx.fill();
+    groundTex.needsUpdate = true;
+  }
+
+  /* ---------------- 入力 ---------------- */
 
   function onDown(e) {
-    const p = U.toView(svg, e.clientX, e.clientY);
+    const ray = stage3.setRay(e);
 
-    if (Math.hypot(p.x - 500, p.y - 655) < 50) { toggleOpen(); return; }
-    if (Math.hypot(p.x - CLOUD.x, p.y - CLOUD.y) < 95) { gust(); return; }
-    if (Math.hypot(p.x - CHICK.x, p.y - CHICK.y) < 62) {
-      chickBounce = 1;
-      S.pop();
-      S.pop(0.1);
+    if (pressBtnCool <= 0 && ray.intersectObject(btnHit, false).length) {
+      pressBtnCool = 0.5;
+      toggleOpen();
       return;
     }
-    /* うらがえった かさをなおす */
-    if (flip.t > 0.5 && p.y < 560) {
+    /* うらがえった生地をタップしてなおす */
+    if (flip.t > 0.5 && ray.intersectObject(canopyMesh, false).length) {
       flip.t = 0;
-      S.boing(320);
-      S.sparkle();
-      fx.burst(500, 300, '#ffd93b', 10);
+      S.thunk();
+      S.flap();
       return;
     }
-    /* かたむけあそび */
-    if (p.y < 620 && tiltId === null) {
+    /* 傘(生地かシャフト)からのドラッグ → かたむけ */
+    if (tiltId === null &&
+        (ray.intersectObject(canopyMesh, false).length || ray.intersectObject(shaftHit, false).length)) {
       tiltId = e.pointerId;
-      tilt.t = U.clamp((p.x - 500) / 420, -1, 1) * 0.38;
+      tiltFrom = { x: e.clientX, rz: tilt.t };
+      return;
+    }
+    if (orbitId === null) {
+      orbitId = e.pointerId;
+      orbitFrom = { x: e.clientX, y: e.clientY, az: stage3.orbit.az, po: stage3.orbit.po };
     }
   }
 
   function onMove(e) {
     if (e.pointerId === tiltId) {
-      const p = U.toView(svg, e.clientX, e.clientY);
-      tilt.t = U.clamp((p.x - 500) / 420, -1, 1) * 0.38;
+      tilt.t = U.clamp(tiltFrom.rz - (e.clientX - tiltFrom.x) * 0.0022, -0.42, 0.42);
+    } else if (e.pointerId === orbitId) {
+      stage3.orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.6, 1.3);
+      stage3.orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.85, 1.5);
     }
   }
 
   function onUp(e) {
-    if (e.pointerId === tiltId) {
-      tiltId = null;
-      tilt.t = 0;   // びよんと まっすぐにもどる
+    if (e.pointerId === tiltId) tiltId = null;
+    else if (e.pointerId === orbitId) orbitId = null;
+  }
+
+  function toggleOpen() {
+    if (open.t < 0.5) {
+      open.t = 1;
+      thunked = false;
+      S.clickReal(0.8);
+      S.whoosh(0.9);
+    } else {
+      open.t = 0;
+      flip.t = 0;
+      S.clickReal(0.7);
+      S.flap();
     }
   }
 
-  /* かさフレーム座標 ⇄ ワールド座標 */
-  function toFrame(x, y, phi) {
-    const c = Math.cos(-phi), s = Math.sin(-phi);
-    return {
-      x: c * (x - PIVOT.x) - s * (y - PIVOT.y) + PIVOT.x,
-      y: s * (x - PIVOT.x) + c * (y - PIVOT.y) + PIVOT.y,
-    };
-  }
-  function toWorld(x, y, phi) {
-    const c = Math.cos(phi), s = Math.sin(phi);
-    return {
-      x: c * (x - PIVOT.x) - s * (y - PIVOT.y) + PIVOT.x,
-      y: s * (x - PIVOT.x) + c * (y - PIVOT.y) + PIVOT.y,
-    };
-  }
+  /* ---------------- メインループ ---------------- */
 
   function loop(now) {
     const dt = Math.min((now - prev) / 1000, 0.033);
     prev = now;
     time += dt;
+    if (pressBtnCool > 0) pressBtnCool -= dt;
 
-    U.stepSpring(open, dt, 130, 7.5);   // ふわっ＆びよん
-    U.stepSpring(flip, dt, 210, 9);
-    U.stepSpring(tilt, dt, 200, 11);
-    fx.step(dt);
+    U.stepSpring(open, dt, 70, 5.5);
+    U.stepSpring(flip, dt, 150, 8);
+    U.stepSpring(tilt, dt, 160, 11);
 
-    if (gustT > 0) gustT -= dt;
-    wind *= Math.exp(-dt * 1.7);
+    /* 開ききった瞬間の音 */
+    if (!thunked && open.t === 1 && open.p > 0.97) {
+      thunked = true;
+      S.thunk();
+      S.flap();
+    }
+
+    /* 突風 */
+    nextGust -= dt;
+    if (nextGust <= 0) {
+      nextGust = U.rand(7, 13);
+      gustT = 1.6;
+      S.whoosh(1);
+      if (open.p > 0.8 && flip.t < 0.5 && Math.random() < 0.55) flipDelay = 0.4;
+    }
+    if (gustT > 0) {
+      gustT -= dt;
+      wind += (720 - wind) * Math.min(1, dt * 2.5);
+    } else {
+      wind *= Math.exp(-dt * 1.4);
+    }
     if (flipDelay >= 0) {
       flipDelay -= dt;
-      if (flipDelay < 0 && open.p > 0.6) {
+      if (flipDelay < 0 && open.p > 0.7) {
         flip.t = 1;
-        S.wobble();
+        S.flap();
       }
     }
 
-    const openT = U.clamp(open.p, -0.1, 1.35);
-    const theta = U.lerp(0.24, 1.26, openT) + flip.p * 0.62;
-    const phi = tilt.p;
-    const sinT = Math.sin(theta), cosT = Math.cos(theta);
-    const spanX = sinT * L;
-    const tipY = HUB.y + cosT * L;
+    /* 傘のかたむき (雨で自然に少しゆれる) */
+    umb.rotation.z = tilt.p + Math.sin(time * 0.7) * 0.012 + wind * 0.00006;
 
-    dom.umb.setAttribute('transform', `rotate(${(phi * 180 / Math.PI).toFixed(2)} ${PIVOT.x} ${PIVOT.y})`);
-
-    /* ランナーとばね */
-    const runnerY = U.lerp(600, 420, U.clamp(openT, 0, 1.1));
-    dom.runner.setAttribute('y', (runnerY - 11).toFixed(1));
-    dom.spring.setAttribute('d', U.springPathV(500, runnerY + 14, 668, 5, 15));
-
-    /* ほね */
-    const lt = { x: HUB.x - spanX, y: tipY };
-    const rt = { x: HUB.x + spanX, y: tipY };
-    const t2 = theta * 0.6, l2 = L * 0.92;
-    const mlt = { x: HUB.x - Math.sin(t2) * l2, y: HUB.y + Math.cos(t2) * l2 };
-    const mrt = { x: HUB.x + Math.sin(t2) * l2, y: HUB.y + Math.cos(t2) * l2 };
-    setLine(dom.ribL, HUB, lt);
-    setLine(dom.ribR, HUB, rt);
-    setLine(dom.ribML, HUB, mlt);
-    setLine(dom.ribMR, HUB, mrt);
-    setLine(dom.stretchL, { x: 500, y: runnerY }, { x: HUB.x - Math.sin(theta) * L * 0.55, y: HUB.y + Math.cos(theta) * L * 0.55 });
-    setLine(dom.stretchR, { x: 500, y: runnerY }, { x: HUB.x + Math.sin(theta) * L * 0.55, y: HUB.y + Math.cos(theta) * L * 0.55 });
-
-    /* ぬの：上のカーブ＋スカラップのふち */
-    const apexY = HUB.y - 70 * U.clamp(openT, 0, 1.2) + flip.p * 240;
-    let d = `M ${lt.x.toFixed(1)} ${lt.y.toFixed(1)} Q ${HUB.x} ${apexY.toFixed(1)} ${rt.x.toFixed(1)} ${rt.y.toFixed(1)}`;
-    const sag = 34 * U.clamp(openT, 0.15, 1.2) * (1 - flip.p * 0.7);
-    let px = rt.x, py = rt.y;
-    for (let i = 3; i >= 0; i--) {
-      const q = { x: U.lerp(lt.x, rt.x, i / 4), y: U.lerp(lt.y, rt.y, i / 4) };
-      const mx = (px + q.x) / 2, my = (py + q.y) / 2 + sag;
-      d += ` Q ${mx.toFixed(1)} ${my.toFixed(1)} ${q.x.toFixed(1)} ${q.y.toFixed(1)}`;
-      px = q.x; py = q.y;
+    /* 骨の角度と各部品 */
+    const o = U.clamp(open.p, -0.05, 1.12);
+    const alpha = U.lerp(0.1, 1.35, o) + flip.p * 0.55;
+    if (Math.abs(o - openShown) > 0.0025 || flip.v !== 0 || flip.p > 0.001) {
+      openShown = o;
+      updateCanopy(alpha);
     }
-    dom.canopy.setAttribute('d', d + ' Z');
-
-    /* ボタンの「おしてね」リング */
-    dom.btnRing.setAttribute('opacity', (0.25 + 0.2 * Math.sin(time * 4)).toFixed(2));
-    dom.btnRing.setAttribute('r', (48 + 5 * Math.sin(time * 4)).toFixed(1));
-
-    /* ---- あめ ---- */
-    if (drops.length < 55 && Math.random() < dt * 30) {
-      const el = U.el('ellipse', { rx: 4.5, ry: 8, fill: '#6fc3ff', opacity: 0.9 }, dom.dropsG);
-      drops.push({ el, x: U.rand(-30, 1030), y: -15, vx: 0, vy: U.rand(360, 520), slide: false, dxS: 0, vs: 0 });
+    const runnerY = U.lerp(420, 690, U.clamp(o, 0, 1.05));
+    runner.position.y = runnerY;
+    springCtl.update(302, runnerY - 314);
+    const hub = new THREE.Vector3(0, HUB_Y, 0);
+    for (let i = 0; i < SECTORS; i++) {
+      const phi = (i / SECTORS) * Math.PI * 2;
+      const tip = ribTip(alpha, phi);
+      orientRod(ribs[i], hub, tip);
+      const mid = hub.clone().lerp(tip, 0.45);
+      orientRod(stretchers[i], new THREE.Vector3(0, runnerY, 0), mid);
     }
 
-    const canOpen = open.p > 0.75 && flip.p < 0.35;
-    for (let i = drops.length - 1; i >= 0; i--) {
-      const dr = drops[i];
-      if (!dr.slide) {
-        dr.vx += (wind * 0.9 - dr.vx) * Math.min(1, dt * 2);
-        dr.x += dr.vx * dt;
-        dr.y += dr.vy * dt;
+    /* --- 雨 --- */
+    const canOpen = open.p > 0.8 && flip.p < 0.35;
+    const spanR = Math.sin(alpha) * RIB_LEN;
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -umb.rotation.z);
+    const tmp = new THREE.Vector3();
+    let landedWet = false;
+    for (let i = 0; i < DROPS; i++) {
+      rainVel[i * 2 + 1] += (wind * 0.9 - rainVel[i * 2 + 1]) * Math.min(1, dt * 2);
+      rainPos[i * 3] += rainVel[i * 2 + 1] * dt;
+      rainPos[i * 3 + 1] += rainVel[i * 2] * dt;
+      const x = rainPos[i * 3], y = rainPos[i * 3 + 1], z = rainPos[i * 3 + 2];
 
-        if (canOpen) {
-          const f = toFrame(dr.x, dr.y, phi);
-          const dx = f.x - HUB.x;
-          if (Math.abs(dx) < spanX * 0.98) {
-            const surf = HUB.y + (dx / spanX) * (dx / spanX) * (tipY - HUB.y);
-            if (f.y > surf - 10 && f.y < surf + 30) {
-              dr.slide = true;
-              dr.dxS = dx;
-              dr.vs = (dx >= 0 ? 1 : -1) * 60;
-              if (tickT <= 0) { S.tick(); tickT = 0.12; }
-              fx.puff(dr.x, dr.y, '#cfeaff', 2);
-            }
+      if (canOpen && y < HUB_Y + 60 && y > HUB_Y - RIB_LEN) {
+        /* 傘ローカル系に直して生地との当たりをみる */
+        tmp.set(x, y, z).applyQuaternion(q);
+        const rd = Math.hypot(tmp.x, tmp.z);
+        if (rd < spanR * 0.97) {
+          const t = rd / spanR;
+          const th = alpha * (0.78 + 0.22 * t);
+          const surfY = HUB_Y - Math.cos(th) * RIB_LEN * t;
+          if (tmp.y < surfY + 30 && tmp.y > surfY - 45) {
+            resetDrop(i);
+            if (patterT <= 0) { S.tick(); patterT = 0.09; }
+            continue;
           }
         }
-        /* ひよこにあたる */
-        if (dr.y > CHICK.y - 55 && dr.y < CHICK.y + 30 && Math.abs(dr.x - CHICK.x) < 52) {
-          wetT = 1.6;
-          fx.puff(dr.x, dr.y, '#9fd6ff', 3);
-          dr.el.remove(); drops.splice(i, 1);
-          continue;
+      }
+      if (y < 2) {
+        if (Math.abs(x) < 1150 && Math.abs(z) < 1150) {
+          wetGround(x, z);
+          landedWet = true;
         }
-        if (dr.y > 930) {
-          fx.puff(dr.x, 935, '#bfe4ff', 2);
-          dr.el.remove(); drops.splice(i, 1);
-          continue;
-        }
-        dr.el.setAttribute('transform', `translate(${dr.x.toFixed(1)} ${dr.y.toFixed(1)})`);
-      } else {
-        /* ぬのの上をころころすべる */
-        dr.vs += ((dr.dxS >= 0 ? 1 : -1) * 800 + 2400 * Math.sin(phi)) * dt;
-        dr.dxS += dr.vs * dt;
-        if (Math.abs(dr.dxS) > spanX || !canOpen) {
-          const surf = HUB.y + (dr.dxS / spanX) * (dr.dxS / spanX) * (tipY - HUB.y);
-          const w = toWorld(HUB.x + U.clamp(dr.dxS, -spanX, spanX), surf, phi);
-          dr.slide = false;
-          dr.x = w.x; dr.y = w.y;
-          dr.vx = dr.vs * Math.cos(phi);
-          dr.vy = 120;
-        } else {
-          const surf = HUB.y + (dr.dxS / spanX) * (dr.dxS / spanX) * (tipY - HUB.y);
-          const w = toWorld(HUB.x + dr.dxS, surf - 6, phi);
-          dr.el.setAttribute('transform', `translate(${w.x.toFixed(1)} ${w.y.toFixed(1)})`);
-        }
+        resetDrop(i);
       }
     }
-    if (tickT > 0) tickT -= dt;
+    rainPts.geometry.attributes.position.needsUpdate = true;
+    if (patterT > 0) patterT -= dt;
 
-    /* ひよこ */
-    chickBounce = Math.max(0, chickBounce - dt * 2);
-    let cy = -Math.abs(Math.sin(time * 3)) * 6;
-    if (chickBounce > 0) cy -= Math.abs(Math.sin(time * 14)) * 22 * chickBounce;
-    if (wetT > 0) {
-      wetT -= dt;
-      dom.chickEyeL.textContent = '＞'; dom.chickEyeR.textContent = '＜';
-      dom.chick.setAttribute('transform', `translate(${(Math.sin(time * 26) * 5).toFixed(1)} ${cy.toFixed(1)})`);
-    } else {
-      dom.chickEyeL.textContent = '•'; dom.chickEyeR.textContent = '•';
-      dom.chick.setAttribute('transform', `translate(0 ${cy.toFixed(1)})`);
+    /* 地面はゆっくり乾く */
+    dryFadeT -= dt;
+    if (dryFadeT <= 0) {
+      dryFadeT = 0.3;
+      groundCtx.fillStyle = 'rgba(141,141,138,0.02)';
+      groundCtx.fillRect(0, 0, 512, 512);
+      if (!landedWet) groundTex.needsUpdate = true;
     }
 
-    /* くも：ぷくぷく */
-    const ck = 1 + 0.03 * Math.sin(time * 2.5) + (gustT > 0 ? 0.12 * gustT : 0);
-    dom.cloud.setAttribute('transform', `translate(${CLOUD.x * (1 - ck)} ${CLOUD.y * (1 - ck)}) scale(${ck.toFixed(3)})`);
-
+    stage3.applyCamera();
+    stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
   }
 
-  function setLine(el, a, b) {
-    el.setAttribute('x1', a.x.toFixed(1));
-    el.setAttribute('y1', a.y.toFixed(1));
-    el.setAttribute('x2', b.x.toFixed(1));
-    el.setAttribute('y2', b.y.toFixed(1));
-  }
+  /* ---------------- 起動と後始末 ---------------- */
 
   return {
-    start(stage) {
-      build(stage);
+    start(el) {
+      time = 0;
+      open = U.spring(0);
+      flip = U.spring(0);
+      tilt = U.spring(0);
+      openShown = -1;
+      thunked = true;
+      wind = 0; gustT = 0; nextGust = 6; flipDelay = -1;
+      pressBtnCool = 0; tiltId = null; orbitId = null;
+      patterT = 0; dryFadeT = 0.3;
+
+      stage3 = G3.createStage(el, {
+        target: new THREE.Vector3(0, 470, 0),
+        radius: 1500, radiusPortraitBase: 1200, radiusMaxPortrait: 2100,
+        az: 0.3, po: 1.25, exposure: 1.0,
+      });
+      build();
+      updateCanopy(0.1);
+      rainSnd = S.rainLoop();
+      rainSnd.set(0.8);
+
+      const dom = stage3.renderer.domElement;
+      dom.addEventListener('pointerdown', onDown);
+      dom.addEventListener('pointermove', onMove);
+      dom.addEventListener('pointerup', onUp);
+      dom.addEventListener('pointercancel', onUp);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
+
     stop() {
       cancelAnimationFrame(raf);
+      if (rainSnd) rainSnd.stop();
+      stage3.dispose();
+      stage3 = null;
+      scene = null;
     },
   };
 })();

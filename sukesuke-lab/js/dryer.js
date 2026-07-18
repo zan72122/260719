@@ -1,362 +1,465 @@
-/* ドライヤーの中身 */
+/* ドライヤーの中身 — 写実3D版 (Three.js)
+ *
+ * 半透明ハウジングの中に軸流ファン・モーター・ニクロムヒーターが見える。
+ * 空気の流れは小さな流線パーティクルで可視化 (冷風=青 / 温風=オレンジ)。
+ * 外の結果: スタンドに掛かったリボンが風でなびき、軽い発泡スチロール球が
+ * 吹き飛ばされて転がる。
+ * 単位は mm。ドライヤーの回転中心 (持ち手上端) がピボット。
+ */
 window.GAMES.dryer = (() => {
-  const PIVOT = { x: 300, y: 430 };   // ドライヤーの回転中心
-  const NOZZLE = 215;                 // ふきだし口（ローカルx）
-  const FACE = { x: 750, y: 430 };
-  const HAIR_N = 9;
+  const PIVOT = new THREE.Vector3(0, 170, 0);
+  const NOZZLE_X = 135;      // ふきだし口 (ローカルX)
+  const AIR_N = 110;
+  const RIB_SEGS = 9;        // リボンの節数
+  const SEG_LEN = 24;
 
-  let svg, raf, prev, fx, dom, time;
-  let aim, afro;
-  let level, hot, aimId;
-  let fanAngle, airLocal, airWorld, bubbles, hairs, ribbon;
-  let spawnAcc, bubbleT, hotStrongT, warmT, happyT, gagOn, windSnd;
+  let stage3, scene, raf, prev, time;
+  let dryerG, fanG, heaterMats, heatLight, powerKnob, heatKnob, heatDotR, heatDotB;
+  let aimHit, powerHit, heatHit;
+  let aim, level, hot;
+  let airMesh, airState, dummy;
+  let ribbons, ribbonMeshes, balls;
+  let aimId, aimFrom, orbitId, orbitFrom;
+  let windSnd, humSnd, thudT;
+  let mats;
 
-  function build(stage) {
-    svg = U.makeSvg(stage, 1000, 1000);
-    aim = U.spring(0);
-    afro = U.spring(0);
-    level = 0; hot = false; aimId = null;
-    fanAngle = 0; airLocal = []; airWorld = []; bubbles = [];
-    spawnAcc = 0; bubbleT = 1; hotStrongT = 0; warmT = 0; happyT = 0; gagOn = false;
-    time = 0;
-    dom = {};
-    windSnd = S.wind();
+  /* ---------------- 組み立て ---------------- */
 
-    /* ---- リボンのはた ---- */
-    U.el('line', { x1: 560, y1: 730, x2: 560, y2: 560, stroke: '#b0895f', 'stroke-width': 10, 'stroke-linecap': 'round' }, svg);
-    U.el('circle', { cx: 560, cy: 556, r: 9, fill: '#ffd93b' }, svg);
-    dom.ribbon = U.el('path', { fill: 'none', stroke: '#ff8fb5', 'stroke-width': 15, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
-    ribbon = [U.spring(0.1), U.spring(0.1), U.spring(0.1)];
-
-    /* ---- おんなのこ ---- */
-    const ch = U.el('g', {}, svg);
-    U.el('ellipse', { cx: FACE.x, cy: FACE.y + 150, rx: 95, ry: 75, fill: '#ffb8d9', stroke: '#ff8fc0', 'stroke-width': 5 }, ch);
-    dom.hairG = U.el('g', { fill: 'none', 'stroke-linecap': 'round' }, svg);
-    dom.face = U.el('g', {}, svg);
-    U.el('circle', { cx: FACE.x, cy: FACE.y, r: 86, fill: '#ffe0c2', stroke: '#eab98d', 'stroke-width': 5 }, dom.face);
-    U.el('circle', { cx: FACE.x - 42, cy: FACE.y + 26, r: 13, fill: '#ffb3ab', opacity: 0.7 }, dom.face);
-    U.el('circle', { cx: FACE.x + 42, cy: FACE.y + 26, r: 13, fill: '#ffb3ab', opacity: 0.7 }, dom.face);
-    dom.eyeL = U.text('•', { x: FACE.x - 30, y: FACE.y + 6, 'text-anchor': 'middle', 'font-size': 38, fill: '#5d4030' }, dom.face);
-    dom.eyeR = U.text('•', { x: FACE.x + 30, y: FACE.y + 6, 'text-anchor': 'middle', 'font-size': 38, fill: '#5d4030' }, dom.face);
-    dom.mouth = U.el('path', { d: '', fill: 'none', stroke: '#5d4030', 'stroke-width': 4.5, 'stroke-linecap': 'round' }, dom.face);
-
-    hairs = [];
-    for (let i = 0; i < HAIR_N; i++) {
-      const a = Math.PI * (1.08 + (i / (HAIR_N - 1)) * 0.84);   // 頭のてっぺんに沿って
-      const rx = FACE.x + Math.cos(a) * 84;
-      const ry = FACE.y + Math.sin(a) * 84;
-      const el = U.el('path', { stroke: '#8a5a3a', 'stroke-width': 13, fill: 'none', 'stroke-linecap': 'round' }, dom.hairG);
-      hairs.push({ el, rx, ry, nx: Math.cos(a), ny: Math.sin(a), o: U.spring(0), ph: U.rand(0, 6) });
+  function counterTexture() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 512;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#d8d4ca';
+    ctx.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 12000; i++) {
+      const v = (172 + Math.random() * 48) | 0;
+      ctx.fillStyle = `rgba(${v},${v - 2},${v - 8},0.5)`;
+      ctx.fillRect(Math.random() * 512, Math.random() * 512, 1.7, 1.7);
     }
-
-    /* ---- ドライヤー本体（回転グループ） ---- */
-    dom.dryer = U.el('g', {}, svg);
-    /* もちて */
-    U.el('rect', { x: -70, y: 70, width: 60, height: 190, rx: 26, transform: 'rotate(14 -40 80)', fill: '#8f6bff', stroke: '#7052d6', 'stroke-width': 5 }, dom.dryer);
-    /* あったかグロー */
-    dom.glow = U.el('rect', { x: 50, y: -70, width: 110, height: 140, rx: 24, fill: '#ff9f43', opacity: 0 }, dom.dryer);
-    /* ファン */
-    dom.fan = U.el('g', {}, dom.dryer);
-    for (let i = 0; i < 5; i++) {
-      U.el('ellipse', { cx: 0, cy: -38, rx: 17, ry: 34, fill: '#7fd0ff', stroke: '#4aa9ee', 'stroke-width': 4, transform: `rotate(${i * 72})` }, dom.fan);
-    }
-    U.el('circle', { cx: 0, cy: 0, r: 17, fill: '#4aa9ee' }, dom.fan);
-    /* ヒーター（オレンジのくねくね線） */
-    for (let i = 0; i < 3; i++) {
-      const x = 70 + i * 30;
-      U.el('path', {
-        d: `M ${x} -52 ${[-30, -10, 10, 30, 52].map((y, j) => `L ${x + (j % 2 === 0 ? 14 : -14)} ${y}`).join(' ')}`,
-        stroke: '#ff7b54', 'stroke-width': 7, fill: 'none', 'stroke-linecap': 'round',
-      }, dom.dryer);
-    }
-    /* すいこみグリル */
-    for (let i = -3; i <= 3; i++) {
-      U.el('line', { x1: -182, y1: i * 22, x2: -160, y2: i * 22, stroke: '#9aa7b8', 'stroke-width': 6, 'stroke-linecap': 'round' }, dom.dryer);
-    }
-    /* なかを飛ぶ空気（ローカル） */
-    dom.airLocalG = U.el('g', {}, dom.dryer);
-    /* スケスケボディ */
-    U.el('path', {
-      d: 'M -95 -95 L 150 -95 L 150 -55 L 215 -32 L 215 32 L 150 55 L 150 95 L -95 95 A 95 95 0 0 1 -190 0 A 95 95 0 0 1 -95 -95 Z',
-      fill: '#dff2ff', opacity: 0.32, stroke: '#7fc4e8', 'stroke-width': 6, 'stroke-linejoin': 'round',
-    }, dom.dryer);
-    U.el('rect', { x: -120, y: -80, width: 150, height: 20, rx: 10, fill: '#ffffff', opacity: 0.5 }, dom.dryer);
-
-    /* そとを飛ぶ空気 */
-    dom.airWorldG = U.el('g', {}, svg);
-    /* シャボン玉 */
-    dom.bubbleG = U.el('g', {}, svg);
-
-    /* ---- ボタン ---- */
-    dom.powerBtn = U.el('g', {}, svg);
-    dom.powerRect = U.el('rect', { x: 60, y: 860, width: 280, height: 110, rx: 30, fill: '#cbd6e0', stroke: '#9aa7b8', 'stroke-width': 6 }, dom.powerBtn);
-    dom.powerIcon = U.text('😴', { x: 120, y: 933, 'text-anchor': 'middle', 'font-size': 50 }, dom.powerBtn);
-    dom.powerLabel = U.text('とまってる', { x: 225, y: 928, 'text-anchor': 'middle', 'font-size': 36, fill: '#ffffff', style: 'paint-order:stroke', stroke: '#7f8fa6', 'stroke-width': 5 }, dom.powerBtn);
-
-    dom.tempBtn = U.el('g', {}, svg);
-    dom.tempRect = U.el('rect', { x: 380, y: 860, width: 280, height: 110, rx: 30, fill: '#a8dcff', stroke: '#5ab7f0', 'stroke-width': 6 }, dom.tempBtn);
-    dom.tempIcon = U.text('❄️', { x: 440, y: 933, 'text-anchor': 'middle', 'font-size': 50 }, dom.tempBtn);
-    dom.tempLabel = U.text('つめたい', { x: 545, y: 928, 'text-anchor': 'middle', 'font-size': 36, fill: '#ffffff', style: 'paint-order:stroke', stroke: '#5ab7f0', 'stroke-width': 5 }, dom.tempBtn);
-
-    U.text('ゆびで うえした にうごかせるよ', { x: 300, y: 210, 'text-anchor': 'middle', 'font-size': 28, fill: '#8faabf' }, svg);
-
-    fx = makeFxLayer(svg);
-
-    svg.addEventListener('pointerdown', onDown);
-    svg.addEventListener('pointermove', onMove);
-    svg.addEventListener('pointerup', onUp);
-    svg.addEventListener('pointercancel', onUp);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    tex.encoding = THREE.sRGBEncoding;
+    return tex;
   }
+
+  function build() {
+    scene = stage3.scene;
+    mats = G3.materials();
+
+    const counter = new THREE.Mesh(
+      new THREE.PlaneGeometry(2600, 2600),
+      new THREE.MeshStandardMaterial({ map: counterTexture(), roughness: 0.5 })
+    );
+    counter.rotation.x = -Math.PI / 2;
+    counter.receiveShadow = true;
+    scene.add(counter);
+
+    scene.background = G3.bgGradient('#f0ede7', '#e2ddd4', '#bdb6a9');
+    G3.addLights(scene, { pos: new THREE.Vector3(400, 800, 500), shadowSpan: 520 });
+
+    /* --- ドライヤー本体 (ねらい用グループ) --- */
+    dryerG = new THREE.Group();
+    dryerG.position.copy(PIVOT);
+    scene.add(dryerG);
+
+    const addX = (parent, geo, mat, x, y, z) => {
+      const m = G3.add(parent, geo, mat, x, y, z);
+      m.rotation.z = Math.PI / 2;   /* シリンダーをX軸向きに */
+      return m;
+    };
+
+    /* ファン (7枚羽の軸流インペラ) */
+    fanG = new THREE.Group();
+    fanG.position.x = -55;
+    dryerG.add(fanG);
+    addX(fanG, new THREE.CylinderGeometry(9, 9, 12, 20), mats.darkPlastic, 0, 0, 0);
+    for (let i = 0; i < 7; i++) {
+      const bg = new THREE.Group();
+      bg.rotation.x = (i / 7) * Math.PI * 2;
+      fanG.add(bg);
+      const blade = G3.add(bg, new THREE.BoxGeometry(2.2, 24, 13), mats.darkPlastic, 0, 21, 0);
+      blade.rotation.y = 0.55;   /* 羽根のピッチ角 */
+    }
+
+    /* モーター */
+    addX(dryerG, new THREE.CylinderGeometry(15, 15, 28, 24), mats.brass, -24, 0, 0);
+    addX(dryerG, new THREE.CylinderGeometry(6, 6, 10, 12), mats.steel, -6, 0, 0);
+
+    /* ヒーター (マイカ枠 + ニクロム線コイル) */
+    const mica = new THREE.MeshStandardMaterial({ color: 0xcfc4a8, roughness: 0.8 });
+    G3.add(dryerG, new THREE.BoxGeometry(48, 56, 1.6), mica, 46, 0, 0);
+    G3.add(dryerG, new THREE.BoxGeometry(48, 1.6, 56), mica, 46, 0, 0);
+    heaterMats = [];
+    [[26, 10], [17, 8]].forEach(([cr, coils]) => {
+      const hm = new THREE.MeshStandardMaterial({
+        color: 0x6b4438, emissive: 0xff3a00, emissiveIntensity: 0, roughness: 0.5,
+      });
+      heaterMats.push(hm);
+      const coil = new THREE.Mesh(
+        new THREE.TubeGeometry(new G3.Helix(0, 46, coils, cr), coils * 22, 0.9, 6, false), hm);
+      const cg = new THREE.Group();
+      cg.position.x = 23;
+      cg.rotation.z = -Math.PI / 2;   /* ローカルY→ワールドX */
+      cg.add(coil);
+      dryerG.add(cg);
+    });
+    heatLight = new THREE.PointLight(0xff5a20, 0, 260);
+    heatLight.position.set(46, 0, 0);
+    dryerG.add(heatLight);
+
+    /* 半透明ハウジング (中が見える) */
+    addX(dryerG, new THREE.CylinderGeometry(38, 38, 160, 40, 1, true), mats.glass, 0, 0, 0);
+    addX(dryerG, new THREE.CylinderGeometry(20, 38, 55, 40, 1, true), mats.glass, 107, 0, 0);
+    addX(dryerG, new THREE.CylinderGeometry(38, 27, 26, 40, 1, true), mats.glass, -93, 0, 0);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(20, 2.2, 10, 28), mats.chrome);
+    ring.position.x = NOZZLE_X;
+    ring.rotation.y = Math.PI / 2;
+    dryerG.add(ring);
+    /* 吸気グリル */
+    const grill = new THREE.Mesh(new THREE.CircleGeometry(26, 24),
+      new THREE.MeshStandardMaterial({ color: 0x30333a, roughness: 0.7 }));
+    grill.position.x = -106;
+    grill.rotation.y = -Math.PI / 2;
+    dryerG.add(grill);
+    for (let i = -2; i <= 2; i++) {
+      G3.add(dryerG, new THREE.BoxGeometry(1.6, 3, 50), mats.darkPlastic, -106, i * 10, 0);
+    }
+
+    /* 持ち手とスイッチ */
+    const handle = G3.add(dryerG, new THREE.CylinderGeometry(13, 12, 115, 20), mats.navy, -22, -88, 0);
+    handle.rotation.z = 0.12;
+    G3.add(dryerG, new THREE.BoxGeometry(4, 46, 11), mats.darkPlastic, -9, -70, 0);
+    powerKnob = G3.add(dryerG, new THREE.BoxGeometry(6, 10, 9), mats.whitePlastic, -7, -84, 0);
+    G3.add(dryerG, new THREE.BoxGeometry(4, 24, 11), mats.darkPlastic, -13.5, -122, 0);
+    heatKnob = G3.add(dryerG, new THREE.BoxGeometry(6, 8, 9), mats.whitePlastic.clone(), -11.5, -127, 0);
+    heatDotB = G3.add(dryerG, new THREE.CylinderGeometry(1.8, 1.8, 1, 8),
+      new THREE.MeshBasicMaterial({ color: 0x2277ff }), -12.5, -112, 7);
+    heatDotB.rotation.x = Math.PI / 2;
+    heatDotR = G3.add(dryerG, new THREE.CylinderGeometry(1.8, 1.8, 1, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff3322 }), -13.8, -132, 7);
+    heatDotR.rotation.x = Math.PI / 2;
+
+    /* あたり判定 (不可視・大きめ) */
+    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+    aimHit = addX(dryerG, new THREE.CylinderGeometry(62, 62, 280, 10, 1, true), hitMat, 10, 0, 0);
+    /* 持ち手の上半分=風量 / 下半分=温度 (子どもの指でも押しやすい) */
+    powerHit = G3.add(dryerG, new THREE.BoxGeometry(64, 64, 58), hitMat, -12, -72, 0);
+    heatHit = G3.add(dryerG, new THREE.BoxGeometry(68, 66, 58), hitMat, -20, -134, 0);
+
+    /* --- 空気の流線 (インスタンス描画) --- */
+    const airGeo = new THREE.SphereGeometry(3.1, 6, 5);
+    airGeo.scale(4.2, 1, 1);
+    airMesh = new THREE.InstancedMesh(airGeo,
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85, depthWrite: false }), AIR_N);
+    airMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    airMesh.frustumCulled = false;   /* インスタンスは原点から遠くへ飛ぶため */
+    scene.add(airMesh);
+    dummy = new THREE.Object3D();
+    airState = [];
+    for (let i = 0; i < AIR_N; i++) airState.push({ on: false, world: false, x: 0, y: 0, z: 0, v: 0, vx: 0, vy: 0, vz: 0, age: 0 });
+
+    /* --- リボンスタンド --- */
+    const rodY = 300, rodX = 360;
+    addRod(rodX, rodY);
+    ribbons = [];
+    ribbonMeshes = [];
+    [-60, 0, 60].forEach(z0 => {
+      const pts = [];
+      for (let i = 0; i <= RIB_SEGS; i++) {
+        pts.push({ x: rodX, y: rodY - 8 - i * SEG_LEN, px: rodX, py: rodY - 8 - i * SEG_LEN });
+      }
+      ribbons.push({ pts, z: z0 });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((RIB_SEGS + 1) * 2 * 3), 3));
+      const idx = [];
+      for (let i = 0; i < RIB_SEGS; i++) {
+        const a = i * 2;
+        idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      }
+      geo.setIndex(idx);
+      const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: 0xc22548, roughness: 0.5, side: THREE.DoubleSide, envMapIntensity: 0.4,
+      }));
+      m.castShadow = true;
+      scene.add(m);
+      ribbonMeshes.push(m);
+    });
+
+    /* --- 発泡スチロール球 --- */
+    const foam = new THREE.MeshStandardMaterial({ color: 0xf4f2ee, roughness: 0.9 });
+    balls = [];
+    [[180, -70], [240, 10], [200, 85]].forEach(([x, z]) => {
+      const m = G3.add(scene, new THREE.SphereGeometry(16, 24, 18), foam, x, 16, z);
+      balls.push({ m, x, y: 16, z, vx: 0, vy: 0, vz: 0 });
+    });
+  }
+
+  function addRod(rodX, rodY) {
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 210, 14), mats.chrome);
+    rod.position.set(rodX, rodY, 0);
+    rod.rotation.x = Math.PI / 2;
+    rod.castShadow = true;
+    scene.add(rod);
+    [-90, 90].forEach(z => {
+      G3.add(scene, new THREE.CylinderGeometry(4, 4, rodY, 14), mats.chrome, rodX, rodY / 2, z);
+      G3.add(scene, new THREE.BoxGeometry(50, 6, 24), mats.darkPlastic, rodX, 3, z);
+    });
+  }
+
+  /* ---------------- 風 ---------------- */
+
+  function nozzleWorld() {
+    const a = aim.p;
+    return {
+      ox: PIVOT.x + Math.cos(a) * NOZZLE_X,
+      oy: PIVOT.y + Math.sin(a) * NOZZLE_X,
+      dx: Math.cos(a),
+      dy: Math.sin(a),
+    };
+  }
+
+  function windForceAt(px, py, pz) {
+    if (level === 0) return 0;
+    const n = nozzleWorld();
+    const rx = px - n.ox, ry = py - n.oy;
+    const t = rx * n.dx + ry * n.dy;
+    if (t < 0) return 0;
+    const perp = Math.hypot(rx * -n.dy + ry * n.dx, pz);
+    const width = 58 + t * 0.5;
+    return (level / 2) * Math.max(0, 1 - perp / width) * Math.max(0, 1 - t / 950);
+  }
+
+  /* ---------------- 入力 ---------------- */
 
   function setPower(n) {
     level = n;
-    S.kachi();
-    if (level > 0) S.whoosh(level / 2);
+    S.clickReal(0.8);
     windSnd.set(level / 2);
-    const looks = [
-      ['#cbd6e0', '#9aa7b8', '😴', 'とまってる'],
-      ['#bfe9b0', '#7cc86a', '🍃', 'よわいかぜ'],
-      ['#ffd493', '#f0a63a', '🌀', 'つよいかぜ'],
-    ][level];
-    dom.powerRect.setAttribute('fill', looks[0]);
-    dom.powerRect.setAttribute('stroke', looks[1]);
-    dom.powerLabel.setAttribute('stroke', looks[1]);
-    dom.powerIcon.textContent = looks[2];
-    dom.powerLabel.textContent = looks[3];
-  }
-
-  function setHot(h) {
-    hot = h;
-    S.kachi();
-    if (hot) S.sparkle();
-    dom.tempRect.setAttribute('fill', hot ? '#ffc4a3' : '#a8dcff');
-    dom.tempRect.setAttribute('stroke', hot ? '#ff8a50' : '#5ab7f0');
-    dom.tempLabel.setAttribute('stroke', hot ? '#ff8a50' : '#5ab7f0');
-    dom.tempIcon.textContent = hot ? '☀️' : '❄️';
-    dom.tempLabel.textContent = hot ? 'あったかい' : 'つめたい';
+    humSnd.set(level / 2);
+    if (level > 0) S.whoosh(level / 2);
   }
 
   function onDown(e) {
-    const p = U.toView(svg, e.clientX, e.clientY);
-
-    if (p.y > 845) {
-      if (p.x > 40 && p.x < 355) { setPower((level + 1) % 3); return; }
-      if (p.x > 365 && p.x < 675) { setHot(!hot); return; }
+    const ray = stage3.setRay(e);
+    if (ray.intersectObject(powerHit, false).length) { setPower((level + 1) % 3); return; }
+    if (ray.intersectObject(heatHit, false).length) { hot = !hot; S.clickReal(0.7); return; }
+    if (aimId === null && ray.intersectObject(aimHit, false).length) {
+      aimId = e.pointerId;
+      aimFrom = { y: e.clientY, a: aim.t };
       return;
     }
-    /* シャボン玉をつつく */
-    for (let i = bubbles.length - 1; i >= 0; i--) {
-      const b = bubbles[i];
-      if (Math.hypot(p.x - b.x, p.y - b.y) < b.r + 14) {
-        popBubble(i);
-        return;
-      }
-    }
-    /* ドライヤーのむきをかえる */
-    if (p.x < 540) {
-      aimId = e.pointerId;
-      aim.t = U.clamp((p.y - PIVOT.y) / 380, -1, 1) * 0.5;
+    if (orbitId === null) {
+      orbitId = e.pointerId;
+      orbitFrom = { x: e.clientX, y: e.clientY, az: stage3.orbit.az, po: stage3.orbit.po };
     }
   }
 
   function onMove(e) {
     if (e.pointerId === aimId) {
-      const p = U.toView(svg, e.clientX, e.clientY);
-      aim.t = U.clamp((p.y - PIVOT.y) / 380, -1, 1) * 0.5;
+      const r = stage3.renderer.domElement.getBoundingClientRect();
+      aim.t = U.clamp(aimFrom.a - ((e.clientY - aimFrom.y) / r.height) * 1.6, -0.3, 0.55);
+    } else if (e.pointerId === orbitId) {
+      stage3.orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.55, 1.25);
+      stage3.orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.8, 1.5);
     }
   }
 
   function onUp(e) {
     if (e.pointerId === aimId) aimId = null;
+    else if (e.pointerId === orbitId) orbitId = null;
   }
 
-  function popBubble(i) {
-    const b = bubbles[i];
-    fx.burst(b.x, b.y, '#a7e8ff', 6, 10);
-    S.pop();
-    S.sparkle();
-    b.el.remove();
-    bubbles.splice(i, 1);
-  }
-
-  /* ふきだし口からの風のつよさ（0〜1） */
-  function windForceAt(px, py, dirX, dirY, ox, oy) {
-    if (level === 0) return 0;
-    const rx = px - ox, ry = py - oy;
-    const t = rx * dirX + ry * dirY;
-    if (t < 0) return 0;
-    const perp = Math.abs(rx * -dirY + ry * dirX);
-    const width = 75 + t * 0.42;
-    return (level / 2) * Math.max(0, 1 - perp / width) * Math.max(0, 1 - t / 900);
-  }
+  /* ---------------- メインループ ---------------- */
 
   function loop(now) {
     const dt = Math.min((now - prev) / 1000, 0.033);
     prev = now;
     time += dt;
+    if (thudT > 0) thudT -= dt;
 
-    U.stepSpring(aim, dt, 160, 12);
-    U.stepSpring(afro, dt, 30, 5);
-    fx.step(dt);
-
-    const a = aim.p;
-    const ca = Math.cos(a), sa = Math.sin(a);
-    const ox = PIVOT.x + NOZZLE * ca, oy = PIVOT.y + NOZZLE * sa;
-    dom.dryer.setAttribute('transform', `translate(${PIVOT.x} ${PIVOT.y}) rotate(${(a * 180 / Math.PI).toFixed(2)})`);
+    U.stepSpring(aim, dt, 170, 13);
+    dryerG.rotation.z = aim.p;
 
     /* ファンとヒーター */
-    fanAngle += (level * 520 + (level ? 140 : 0)) * dt;
-    dom.fan.setAttribute('transform', `translate(-90 0) rotate(${(fanAngle % 360).toFixed(1)})`);
-    const glowTarget = hot && level > 0 ? 0.4 + 0.12 * Math.sin(time * 6) : 0;
-    dom.glow.setAttribute('opacity', glowTarget.toFixed(2));
+    fanG.rotation.x -= (level * 14 + (level ? 4 : 0)) * dt;
+    const glow = hot && level > 0 ? 1 : 0;
+    heaterMats.forEach(hm => {
+      hm.emissiveIntensity += (glow * (1.1 + 0.15 * Math.sin(time * 7)) - hm.emissiveIntensity) * Math.min(1, dt * 5);
+    });
+    heatLight.intensity += (glow * 0.55 - heatLight.intensity) * Math.min(1, dt * 5);
+    /* スイッチのノブ位置 */
+    powerKnob.position.y += ((-84 + level * 13) - powerKnob.position.y) * Math.min(1, dt * 16);
+    heatKnob.position.y += ((hot ? -132 : -122) - heatKnob.position.y) * Math.min(1, dt * 16);
+    heatKnob.material.color.lerp(new THREE.Color(hot ? 0xe05540 : 0xeceae2), Math.min(1, dt * 8));
 
-    /* なかの空気（小さな丸） */
-    spawnAcc += level * 38 * dt;
-    while (spawnAcc >= 1) {
-      spawnAcc -= 1;
-      const el = U.el('circle', { r: U.rand(5, 9), fill: '#cfd8e0', opacity: 0.85 }, dom.airLocalG);
-      airLocal.push({ el, lx: -185, ly: U.rand(-58, 58), v: U.rand(140, 200) });
-    }
-    for (let i = airLocal.length - 1; i >= 0; i--) {
-      const q = airLocal[i];
-      q.v = Math.min(q.v + 900 * dt, 320 + level * 260);
-      q.lx += q.v * dt;
-      q.ly *= 1 - dt * 1.6;   // ノズルへすぼまる
-      q.el.setAttribute('fill', q.lx > 55 ? (hot ? '#ffb46b' : '#8fd0ff') : '#cfd8e0');
-      q.el.setAttribute('cx', q.lx.toFixed(1));
-      q.el.setAttribute('cy', q.ly.toFixed(1));
-      if (q.lx > NOZZLE) {
-        q.el.remove();
-        airLocal.splice(i, 1);
-        const wx = PIVOT.x + q.lx * ca - q.ly * sa;
-        const wy = PIVOT.y + q.lx * sa + q.ly * ca;
-        const spd = q.v * U.rand(1, 1.35);
-        const wobble = U.rand(-55, 55);
-        const el2 = U.el('circle', { r: U.rand(5, 9), fill: hot ? '#ffb46b' : '#8fd0ff', opacity: 0.9 }, dom.airWorldG);
-        airWorld.push({ el: el2, x: wx, y: wy, vx: spd * ca - wobble * sa, vy: spd * sa + wobble * ca, life: U.rand(0.9, 1.5), age: 0 });
+    /* --- 空気の流線 --- */
+    const a = aim.p, ca = Math.cos(a), sa = Math.sin(a);
+    const spawnN = level > 0 ? Math.floor(level * 40 * dt + Math.random()) : 0;
+    let spawned = 0;
+    const cold = new THREE.Color(0x2f8fe8), warm = new THREE.Color(0xf06a10), gray = new THREE.Color(0x8a9daa);
+    for (let i = 0; i < AIR_N; i++) {
+      const p = airState[i];
+      if (!p.on) {
+        if (spawned < spawnN) {
+          spawned++;
+          p.on = true; p.world = false;
+          p.x = -102; p.y = U.rand(-24, 24); p.z = U.rand(-24, 24);
+          p.v = 260 + level * 190;
+          p.age = 0;
+          airMesh.setColorAt(i, gray);
+        } else {
+          dummy.position.set(0, -4000, 0);
+          dummy.updateMatrix();
+          airMesh.setMatrixAt(i, dummy.matrix);
+          continue;
+        }
       }
-    }
-    for (let i = airWorld.length - 1; i >= 0; i--) {
-      const q = airWorld[i];
-      q.age += dt;
-      if (q.age >= q.life || q.x > 1020) { q.el.remove(); airWorld.splice(i, 1); continue; }
-      q.x += q.vx * dt;
-      q.y += q.vy * dt;
-      q.el.setAttribute('cx', q.x.toFixed(1));
-      q.el.setAttribute('cy', q.y.toFixed(1));
-      q.el.setAttribute('opacity', (0.9 * (1 - q.age / q.life)).toFixed(2));
-    }
-
-    /* かみのけ */
-    const faceForce = windForceAt(FACE.x, FACE.y - 60, ca, sa, ox, oy);
-    for (let i = 0; i < hairs.length; i++) {
-      const h = hairs[i];
-      const force = windForceAt(h.rx, h.ry, ca, sa, ox, oy);
-      h.o.t = force * 150;
-      U.stepSpring(h.o, dt, 90 + i * 8, 7);
-      const len = 60 + afro.p * 55 + Math.sin(time * 2 + h.ph) * 4;
-      const crazy = afro.p * Math.sin(time * 9 + h.ph) * 26;
-      const ex = h.rx + h.nx * len + h.o.p * ca + crazy * h.ny;
-      const ey = h.ry + h.ny * len + h.o.p * sa * 0.7 - afro.p * 18 - crazy * h.nx;
-      const cx = h.rx + h.nx * len * 0.55 + h.o.p * ca * 0.35;
-      const cy = h.ry + h.ny * len * 0.55 - afro.p * 10;
-      h.el.setAttribute('d', `M ${h.rx.toFixed(1)} ${h.ry.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`);
-    }
-
-    /* リボン */
-    const ribForce = windForceAt(560, 590, ca, sa, ox, oy);
-    let rpx = 560, rpy = 570;
-    let d = `M ${rpx} ${rpy}`;
-    for (let i = 0; i < ribbon.length; i++) {
-      const seg = ribbon[i];
-      seg.t = U.clamp(ribForce * (1.7 - i * 0.2), 0, 1.5) + Math.sin(time * (3 + i)) * 0.12;
-      U.stepSpring(seg, dt, 60, 6);
-      rpx += Math.sin(seg.p) * 56;
-      rpy += Math.cos(seg.p) * 56 * (seg.p > 1.2 ? 0.4 : 1);
-      d += ` L ${rpx.toFixed(1)} ${rpy.toFixed(1)}`;
-    }
-    dom.ribbon.setAttribute('d', d);
-
-    /* シャボン玉 */
-    bubbleT -= dt;
-    if (bubbleT <= 0 && bubbles.length < 8) {
-      bubbleT = U.rand(1.6, 2.8);
-      const r = U.rand(16, 30);
-      const el = U.el('g', {}, dom.bubbleG);
-      U.el('circle', { r, fill: '#dff4ff', opacity: 0.45, stroke: '#9fd6f2', 'stroke-width': 3.5 }, el);
-      U.el('circle', { cx: -r * 0.35, cy: -r * 0.35, r: r * 0.22, fill: '#ffffff', opacity: 0.9 }, el);
-      bubbles.push({ el, x: U.rand(120, 900), y: 990 + r, r, vx: 0, vy: -U.rand(35, 60), age: 0 });
-    }
-    for (let i = bubbles.length - 1; i >= 0; i--) {
-      const b = bubbles[i];
-      b.age += dt;
-      const force = windForceAt(b.x, b.y, ca, sa, ox, oy);
-      b.vx += force * 700 * ca * dt;
-      b.vy += force * 700 * sa * dt;
-      b.vx *= Math.exp(-dt * 1.2);
-      b.vy = (b.vy + 30 * dt * (b.vy > -30 ? -1 : 0)) * Math.exp(-dt * 0.4);
-      b.x += (b.vx + Math.sin(time * 2 + i) * 20) * dt;
-      b.y += (b.vy - 20) * dt;
-      if (b.y < -b.r - 10 || b.x > 1010 || b.x < -30 || b.age > 12) {
-        popBubble(i);
-        continue;
+      if (!p.world) {
+        p.v = Math.min(p.v + 1300 * dt, 380 + level * 320);
+        p.x += p.v * dt;
+        p.y *= 1 - dt * 2.2;
+        p.z *= 1 - dt * 2.2;
+        if (p.x > 30) airMesh.setColorAt(i, hot ? warm : cold);
+        if (p.x > NOZZLE_X) {
+          p.world = true;
+          airMesh.setColorAt(i, hot ? warm : cold);
+          const wx = PIVOT.x + p.x * ca - p.y * sa;
+          const wy = PIVOT.y + p.x * sa + p.y * ca;
+          const sp = p.v * U.rand(1, 1.25);
+          const wob = U.rand(-40, 40);
+          p.x = wx; p.y = wy;
+          p.vx = sp * ca - wob * sa;
+          p.vy = sp * sa + wob * ca;
+          p.vz = U.rand(-30, 30);
+        }
+        const wx = PIVOT.x + p.x * ca - p.y * sa;
+        const wy = PIVOT.y + p.x * sa + p.y * ca;
+        dummy.position.set(wx, wy, p.z);
+        dummy.rotation.set(0, 0, a);
+      } else {
+        p.age += dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.z += p.vz * dt;
+        if (p.age > 1.3 || p.x > 900 || p.y < 4) p.on = false;
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.rotation.set(0, 0, Math.atan2(p.vy, p.vx));
       }
-      b.el.setAttribute('transform', `translate(${b.x.toFixed(1)} ${b.y.toFixed(1)})`);
+      dummy.updateMatrix();
+      airMesh.setMatrixAt(i, dummy.matrix);
     }
+    airMesh.instanceMatrix.needsUpdate = true;
+    if (airMesh.instanceColor) airMesh.instanceColor.needsUpdate = true;
 
-    /* あったか×つよい でボワッ */
-    if (level === 2 && hot) {
-      hotStrongT += dt;
-      if (hotStrongT > 3.5 && !gagOn) {
-        gagOn = true;
-        afro.t = 1;
-        S.wobble();
-        fx.burst(FACE.x, FACE.y - 90, '#ffd93b', 10);
+    /* --- リボン (バーレット物理) --- */
+    const n = nozzleWorld();
+    ribbons.forEach((rb, ri) => {
+      const pts = rb.pts;
+      for (let i = 1; i <= RIB_SEGS; i++) {
+        const p = pts[i];
+        const f = windForceAt(p.x, p.y, rb.z);
+        const turb = Math.sin(time * 11 + i * 1.7 + ri * 2.3) * f * 600;
+        const ax = f * 2600 * n.dx;
+        const ay = -1100 + f * 2600 * n.dy + turb;
+        const nx = p.x + (p.x - p.px) * 0.94 + ax * dt * dt;
+        const ny = p.y + (p.y - p.py) * 0.94 + ay * dt * dt;
+        p.px = p.x; p.py = p.y;
+        p.x = nx; p.y = Math.max(6, ny);
       }
-    } else {
-      hotStrongT = 0;
-      if (gagOn) { gagOn = false; afro.t = 0; }
-    }
-
-    /* あったかい風でさらさらヘアー */
-    if (hot && level >= 1 && faceForce > 0.22 && !gagOn) {
-      warmT += dt;
-      if (warmT > 3) {
-        warmT = -6;
-        happyT = 2.2;
-        S.yay();
-        fx.burst(FACE.x, FACE.y - 60, '#ffd93b', 14);
+      for (let iter = 0; iter < 3; iter++) {
+        for (let i = 0; i < RIB_SEGS; i++) {
+          const p0 = pts[i], p1 = pts[i + 1];
+          const dx = p1.x - p0.x, dy = p1.y - p0.y;
+          const d = Math.hypot(dx, dy) || 1;
+          const diff = (d - SEG_LEN) / d;
+          if (i === 0) {
+            p1.x -= dx * diff;
+            p1.y -= dy * diff;
+          } else {
+            p0.x += dx * diff * 0.5;
+            p0.y += dy * diff * 0.5;
+            p1.x -= dx * diff * 0.5;
+            p1.y -= dy * diff * 0.5;
+          }
+        }
       }
-    }
+      /* 帯として描く */
+      const arr = ribbonMeshes[ri].geometry.attributes.position.array;
+      let k = 0;
+      for (let i = 0; i <= RIB_SEGS; i++) {
+        const sway = Math.sin(time * 9 + i + ri) * windForceAt(pts[i].x, pts[i].y, rb.z) * 10;
+        arr[k++] = pts[i].x; arr[k++] = pts[i].y; arr[k++] = rb.z - 9 + sway;
+        arr[k++] = pts[i].x; arr[k++] = pts[i].y; arr[k++] = rb.z + 9 + sway;
+      }
+      ribbonMeshes[ri].geometry.attributes.position.needsUpdate = true;
+      ribbonMeshes[ri].geometry.computeVertexNormals();
+    });
 
-    /* かお */
-    if (gagOn || afro.p > 0.4) {
-      dom.eyeL.textContent = '◎'; dom.eyeR.textContent = '◎';
-      dom.mouth.setAttribute('d', `M ${FACE.x - 16} ${FACE.y + 42} a 16 14 0 1 0 32 0 a 16 14 0 1 0 -32 0`);
-    } else if (happyT > 0) {
-      happyT -= dt;
-      dom.eyeL.textContent = '＾'; dom.eyeR.textContent = '＾';
-      dom.mouth.setAttribute('d', `M ${FACE.x - 26} ${FACE.y + 36} Q ${FACE.x} ${FACE.y + 62} ${FACE.x + 26} ${FACE.y + 36}`);
-    } else if (faceForce > 0.25) {
-      dom.eyeL.textContent = '＞'; dom.eyeR.textContent = '＜';
-      dom.mouth.setAttribute('d', `M ${FACE.x - 14} ${FACE.y + 44} Q ${FACE.x} ${FACE.y + 52} ${FACE.x + 14} ${FACE.y + 44}`);
-    } else {
-      dom.eyeL.textContent = '•'; dom.eyeR.textContent = '•';
-      dom.mouth.setAttribute('d', `M ${FACE.x - 20} ${FACE.y + 38} Q ${FACE.x} ${FACE.y + 54} ${FACE.x + 20} ${FACE.y + 38}`);
-    }
+    /* --- 発泡スチロール球 --- */
+    balls.forEach(b => {
+      const f = windForceAt(b.x, b.y, b.z);
+      b.vx += f * 2800 * n.dx * dt;
+      b.vy += (f * 2800 * n.dy - 3800) * dt;
+      b.vz += f * 300 * Math.sin(time * 5 + b.z) * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.z += b.vz * dt;
+      if (b.y < 16) {
+        b.y = 16;
+        if (b.vy < -140 && thudT <= 0) { thudT = 0.12; S.thunk(); }
+        b.vy *= -0.35;
+        b.vx *= 1 - Math.min(1, dt * 3);
+        b.vz *= 1 - Math.min(1, dt * 3);
+      }
+      if (b.x < -140) { b.x = -140; b.vx *= -0.5; }
+      if (b.x > 780) { b.x = 780; b.vx *= -0.5; }
+      if (Math.abs(b.z) > 320) { b.z = Math.sign(b.z) * 320; b.vz *= -0.5; }
+      b.m.position.set(b.x, b.y, b.z);
+      b.m.rotation.z -= (b.vx / 16) * dt;
+      b.m.rotation.x += (b.vz / 16) * dt;
+    });
 
+    stage3.applyCamera();
+    stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
   }
 
+  /* ---------------- 起動と後始末 ---------------- */
+
   return {
-    start(stage) {
-      build(stage);
+    start(el) {
+      time = 0;
+      aim = U.spring(0);
+      level = 0; hot = false;
+      aimId = null; orbitId = null; thudT = 0;
+
+      stage3 = G3.createStage(el, {
+        target: new THREE.Vector3(200, 150, 0),
+        radius: 880, radiusPortraitBase: 720, radiusMaxPortrait: 1250,
+        az: 0.35, po: 1.32,
+      });
+      build();
+      windSnd = S.wind();
+      humSnd = S.humLoop();
+
+      const dom = stage3.renderer.domElement;
+      dom.addEventListener('pointerdown', onDown);
+      dom.addEventListener('pointermove', onMove);
+      dom.addEventListener('pointerup', onUp);
+      dom.addEventListener('pointercancel', onUp);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
+
     stop() {
       cancelAnimationFrame(raf);
       if (windSnd) windSnd.stop();
+      if (humSnd) humSnd.stop();
+      stage3.dispose();
+      stage3 = null;
+      scene = null;
     },
   };
 })();

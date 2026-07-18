@@ -7,9 +7,10 @@
  * 単位は mm。ペンはローカル +Y 軸沿い、ペン先端がローカル原点。
  */
 window.GAMES.pen = (() => {
-  const PRESS_MAX = 8;     // ノックの最大押し込み量
-  const TIP_OUT = 5;       // 係合時に芯が繰り出される量
-  const CLICK_DEPTH = 6;   // カムが回るストローク位置 (余裕をもたせる)
+  const PRESS_MAX = 8;      // ノックの最大押し込み量
+  const TIP_OUT = 5;        // 係合時に芯が繰り出される量
+  const CLICK_DEPTH = 6;    // カムが回るストローク位置 (余裕をもたせる)
+  const ENGAGED_REST = 4;   // 芯が出ている間、ノックボタンが沈んで止まる位置 (実物挙動)
 
   let stage, renderer, scene, camera, raf, prev, time;
   let penRoot, plungerG, refillG, camG, springMesh, knockHit;
@@ -406,7 +407,8 @@ window.GAMES.pen = (() => {
 
     /* 指を離しても、押し切ったストロークは最下点まで進んでから戻る */
     if (pendingRelease) {
-      if (clicked || plunger.t < CLICK_DEPTH) plunger.t = 0;
+      if (clicked) plunger.t = 0;
+      else if (plunger.t < CLICK_DEPTH) plunger.t = engaged ? ENGAGED_REST : 0;
     }
 
     /* ノック: 押し込みは機械的に固く、戻りはバネらしく */
@@ -422,7 +424,8 @@ window.GAMES.pen = (() => {
       pendingRelease = false;
       clicked = false;
       engaged = !engaged;
-      plunger.t = engaged ? 1.2 : 0;
+      /* 係合中はボタンが半分沈んだ位置で止まる (本物のノックペンと同じ) */
+      plunger.t = engaged ? ENGAGED_REST : 0;
       if (engaged) {
         S.clickReal(0.85, 0.03);      /* 芯が係合して固定される音 */
       } else {
@@ -432,8 +435,10 @@ window.GAMES.pen = (() => {
     }
     plungerG.position.y = -plunger.p;
 
-    /* 芯: プランジャーに押され、係合位置またはゼロ位置へバネで戻る */
-    refill.t = (engaged ? -TIP_OUT : 0) - plunger.p * 0.5;
+    /* 芯: 休止位置より深く押した分だけさらに押し込まれ、
+       離すと係合位置またはゼロ位置へバネで戻る */
+    const pressExtra = Math.max(0, plunger.p - (engaged ? ENGAGED_REST : 0));
+    refill.t = (engaged ? -TIP_OUT : 0) - pressExtra * 0.5;
     U.stepSpring(refill, dt, engaged ? 1400 : 620, engaged ? 30 : 15);
     refillG.position.y = refill.p;
 
