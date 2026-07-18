@@ -139,6 +139,80 @@ const S = (() => {
       blip('triangle', 500, 130, 0.3, 0.2, 0.06);
     },
 
+    /* ---- 写実系（3Dペンなど実録風の音） ---- */
+
+    /* 金属ラッチの実物風クリック */
+    clickReal(vol, delay) {
+      const c = ac(); if (!c) return;
+      vol = vol == null ? 1 : vol;
+      const t = c.currentTime + (delay || 0);
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      const f = c.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 2600;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.5 * vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.018);
+      src.connect(f).connect(g).connect(c.destination);
+      src.start(t);
+      src.stop(t + 0.04);
+      blip('sine', 1300, 480, 0.028, 0.2 * vol, (delay || 0) + 0.012);
+    },
+
+    /* バネが戻るときの微かな金属振動＋着座音 */
+    snapBack() {
+      const c = ac(); if (!c) return;
+      const t = c.currentTime;
+      [[2150, 0.1], [3350, 0.07]].forEach(([fq, dur]) => {
+        const o = c.createOscillator();
+        const g = c.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(fq, t);
+        o.frequency.exponentialRampToValueAtTime(fq * 0.93, t + dur);
+        g.gain.setValueAtTime(0.06, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g).connect(c.destination);
+        o.start(t);
+        o.stop(t + dur + 0.02);
+      });
+      this.clickReal(0.75, 0.05);
+    },
+
+    /* ボールペンが紙をこする音。set(0〜1)で速さ、stop()で終了 */
+    scratchLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 3200;
+      f.Q.value = 1.1;
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          const t = c.currentTime;
+          g.gain.cancelScheduledValues(t);
+          g.gain.setTargetAtTime(Math.min(level, 1) * 0.09, t, 0.04);
+          f.frequency.setTargetAtTime(2800 + level * 1800, t, 0.06);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          const t = c.currentTime;
+          g.gain.setTargetAtTime(0, t, 0.03);
+          try { src.stop(t + 0.2); } catch (e) { /* already stopped */ }
+        },
+      };
+    },
+
     /* 連続の風音。set(0〜1)で強さ、stop()で終了 */
     wind() {
       const c = ac();
