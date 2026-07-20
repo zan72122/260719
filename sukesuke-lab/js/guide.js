@@ -239,6 +239,10 @@ window.GUIDE = (() => {
     },
 
     tick(dt) {
+      try { this._tick(dt); } catch (e) { hide(); }
+    },
+
+    _tick(dt) {
       if (!steps) return;
       const cur = currentStep();
       if (cur !== stepIdx) {

@@ -382,7 +382,7 @@ window.GAMES.carwash = (() => {
 
       /* 4歳向けガイド: コインを入れる → おわったら車をタップ */
       GUIDE.start(stage3, [
-        { kind: 'drag', at: () => coinHit, to: () => slotBox, when: () => phase === 'idle', done: () => phase !== 'idle' },
+        { kind: 'drag', at: () => coinHit, to: () => window.__pts.slot, when: () => phase === 'idle', done: () => phase !== 'idle' },
         { kind: 'tap', at: () => carHit, when: () => phase === 'done', done: () => phase !== 'done' },
       ]);
 
