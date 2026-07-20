@@ -328,6 +328,209 @@ const S = (() => {
       };
     },
 
+    /* コインを入れるチャリン */
+    coin() {
+      blip('sine', 4200, 3900, 0.06, 0.12);
+      blip('sine', 3100, 2800, 0.09, 0.1, 0.05);
+      hiss(0.12, 0.05, 5200, 0.1);
+      blip('sine', 2500, 2300, 0.05, 0.06, 0.16);
+    },
+
+    /* 巻き上げなどのラチェット1コマ */
+    ratchet(vol) {
+      vol = vol == null ? 1 : vol;
+      blip('square', 1900, 1300, 0.02, 0.12 * vol);
+      hiss(0.02, 0.06 * vol, 3400);
+    },
+
+    /* ブー (エラー・過積載) */
+    buzz() {
+      const c = ac(); if (!c) return;
+      const t = c.currentTime;
+      const o = c.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 210;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.09, t);
+      g.gain.setValueAtTime(0.09, t + 0.28);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.34);
+      o.connect(g).connect(c.destination);
+      o.start(t); o.stop(t + 0.4);
+    },
+
+    /* スタンプがガチャン */
+    stamp() {
+      blip('sine', 300, 90, 0.06, 0.3);
+      blip('square', 1500, 900, 0.03, 0.15, 0.03);
+      hiss(0.05, 0.12, 1200, 0.02);
+    },
+
+    /* ドーン (打上げ・破裂。size 0〜1で重さ) */
+    boom(size, delay) {
+      size = size == null ? 1 : size;
+      const c = ac(); if (!c) return;
+      const t = c.currentTime + (delay || 0);
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(90 + 60 * (1 - size), t);
+      o.frequency.exponentialRampToValueAtTime(34, t + 0.5);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.5 * size, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.6 + size * 0.4);
+      o.connect(g).connect(c.destination);
+      o.start(t); o.stop(t + 1.2);
+      hiss(0.5 + size * 0.4, 0.22 * size, 500, delay);
+    },
+
+    /* パチパチ (花火の残り火) */
+    crackleBurst(n, delay) {
+      n = n || 8;
+      for (let i = 0; i < n; i++) {
+        blip('square', 2400 + (i % 5) * 380, 1500, 0.02, 0.05, (delay || 0) + i * 0.05 + (i % 3) * 0.02);
+      }
+    },
+
+    /* 蒸気機関車の汽笛 */
+    trainWhistle(dur) {
+      const c = ac(); if (!c) return;
+      const t = c.currentTime;
+      dur = dur || 0.9;
+      [620, 780, 930].forEach(fq => {
+        const o = c.createOscillator();
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(fq * 0.96, t);
+        o.frequency.linearRampToValueAtTime(fq, t + 0.08);
+        const g = c.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.055, t + 0.08);
+        g.gain.setValueAtTime(0.055, t + dur - 0.15);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.connect(g).connect(c.destination);
+        o.start(t); o.stop(t + dur + 0.1);
+      });
+      hiss(dur, 0.05, 1800);
+    },
+
+    /* エレベーターのチーン */
+    ding() {
+      blip('sine', 880, 875, 0.5, 0.12);
+      blip('sine', 1320, 1310, 0.4, 0.07, 0.01);
+    },
+
+    /* 汽笛より小さいシュッシュ (ドラフト音1回) */
+    chuff(vol) {
+      hiss(0.16, 0.2 * (vol == null ? 1 : vol), 900);
+    },
+
+    /* シャッターのカシャッ */
+    shutterClack() {
+      blip('square', 2600, 1800, 0.015, 0.16);
+      hiss(0.03, 0.14, 3000, 0.012);
+      blip('sine', 420, 180, 0.05, 0.2, 0.03);
+      blip('square', 2000, 1400, 0.02, 0.12, 0.07);
+    },
+
+    /* モーターのサーボ音ループ。set(0〜1)、stop() */
+    servoLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const o = c.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = 170;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 600;
+      const g = c.createGain();
+      g.gain.value = 0;
+      o.connect(f).connect(g).connect(c.destination);
+      o.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          const t = c.currentTime;
+          g.gain.setTargetAtTime(level * 0.045, t, 0.08);
+          o.frequency.setTargetAtTime(150 + level * 260, t, 0.08);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.06);
+          try { o.stop(c.currentTime + 0.3); } catch (e) { /* stopped */ }
+        },
+      };
+    },
+
+    /* 低いゴーというループ (ロケット・ボイラー)。set(0〜1)、stop() */
+    rumbleLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 240;
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          const t = c.currentTime;
+          g.gain.setTargetAtTime(level * 0.34, t, 0.15);
+          f.frequency.setTargetAtTime(180 + level * 420, t, 0.15);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.12);
+          try { src.stop(c.currentTime + 0.6); } catch (e) { /* stopped */ }
+        },
+      };
+    },
+
+    /* 導火線のパチパチループ。set(0〜1)、stop() */
+    fuseLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 3600;
+      f.Q.value = 1.4;
+      const lfo = c.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.value = 13;
+      const lg = c.createGain();
+      lg.gain.value = 0;
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      lfo.connect(lg).connect(g.gain);
+      lfo.start();
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          g.gain.setTargetAtTime(level * 0.045, c.currentTime, 0.06);
+          lg.gain.setTargetAtTime(level * 0.04, c.currentTime, 0.06);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.05);
+          lg.gain.setTargetAtTime(0, c.currentTime, 0.05);
+          try { src.stop(c.currentTime + 0.3); lfo.stop(c.currentTime + 0.3); } catch (e) { /* stopped */ }
+        },
+      };
+    },
+
     /* ボールペンが紙をこする音。set(0〜1)で速さ、stop()で終了 */
     scratchLoop() {
       const c = ac();
