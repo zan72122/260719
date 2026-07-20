@@ -42,6 +42,25 @@ const U = {
   /* びよんびよんバネ: {p:現在値, v:速度, t:目標値} */
   spring(p) { return { p, v: 0, t: p }; },
 
+  /* ポインタ速度トラッカー: push(x,y,tミリ秒) して vel() で px/s を得る */
+  velTracker() {
+    const buf = [];
+    return {
+      push(x, y, t) {
+        buf.push({ x, y, t });
+        while (buf.length > 6 || (buf.length > 1 && t - buf[0].t > 130)) buf.shift();
+      },
+      vel() {
+        if (buf.length < 2) return { x: 0, y: 0, mag: 0 };
+        const a = buf[0], b = buf[buf.length - 1];
+        const dt = Math.max(8, b.t - a.t) / 1000;
+        const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt;
+        return { x: vx, y: vy, mag: Math.hypot(vx, vy) };
+      },
+      reset() { buf.length = 0; },
+    };
+  },
+
   stepSpring(s, dt, stiff, damp) {
     s.v += (s.t - s.p) * stiff * dt;
     s.v *= Math.exp(-damp * dt);
