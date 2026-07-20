@@ -313,8 +313,8 @@ window.GAMES.camera = (() => {
   function addPrint(cv) {
     const i = printCount++;
     const g = new THREE.Group();
-    const col = i % 4, row = Math.floor(i / 4) % 3;
-    g.position.set(-480 + col * 240 + (row % 2) * 40, 181 + Math.floor(i / 12) * 0.5, 300 + row * 130);
+    const col = i % 3, row = Math.floor(i / 3) % 2;
+    g.position.set(-20 + col * 200 + row * 100, 181 + Math.floor(i / 6) * 2.5, 350 - row * 140);
     g.rotation.y = ((i * 37) % 10 - 5) * 0.03;
     const card = new THREE.Mesh(new THREE.BoxGeometry(210, 2, 168),
       new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.6 }));
