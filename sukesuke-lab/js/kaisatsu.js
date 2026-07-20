@@ -119,7 +119,7 @@ window.GAMES.kaisatsu = (() => {
 
     /* --- 切符2枚 (ふつう / 期限切れ) --- */
     tickets = [];
-    [[0xfff8e8, false, -350], [0xd8d0c0, true, -230]].forEach(([col, expired, x]) => {
+    [[0xfff8e8, false, -120], [0xd8d0c0, true, 0]].forEach(([col, expired, x]) => {
       const g = new THREE.Group();
       const t = G3.add(g, new THREE.BoxGeometry(80, 3, 50),
         new THREE.MeshStandardMaterial({ color: col, roughness: 0.7 }), 0, 0, 0);
@@ -135,7 +135,7 @@ window.GAMES.kaisatsu = (() => {
     });
     /* 台 */
     G3.add(scene, new THREE.BoxGeometry(320, 70, 140),
-      new THREE.MeshStandardMaterial({ color: 0x8a7a5e, roughness: 0.8 }), -290, 40, 360);
+      new THREE.MeshStandardMaterial({ color: 0x8a7a5e, roughness: 0.8 }), -60, 40, 360);
 
     /* スーツケース */
     suitcase = new THREE.Group();

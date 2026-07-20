@@ -337,7 +337,8 @@ window.GAMES.vault = (() => {
         if (Math.abs(next - handleA) > 0.002 && servo) servo.set(0.5);
         handleA = next;
       } else if (dragMode === 'door') {
-        const d = (e.clientX - dragA0) / 240;
+        /* 扉は手前 (画面左) へ引いてあける */
+        const d = (dragA0 - e.clientX) / 240;
         dragA0 = e.clientX;
         doorA.t = U.clamp(doorA.t + d, 0, 1.75);
       }

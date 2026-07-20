@@ -47,16 +47,16 @@ window.GAMES.camera = (() => {
     /* --- ジオラマ (窓のむこうの景色) --- */
     const hill = new THREE.Mesh(new THREE.CylinderGeometry(2600, 2800, 300, 40),
       new THREE.MeshStandardMaterial({ color: 0x6fa552, roughness: 0.9 }));
-    hill.position.set(900, -150, -2400);
+    hill.position.set(1450, -150, -1700);
     scene.add(hill);
     /* 風車 */
     const towerM = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.6 });
-    const tower = G3.add(scene, new THREE.CylinderGeometry(60, 110, 620, 16), towerM, 1500, 310, -2200);
+    const tower = G3.add(scene, new THREE.CylinderGeometry(60, 110, 620, 16), towerM, 1750, 310, -1650);
     tower.castShadow = true;
     G3.add(scene, new THREE.ConeGeometry(80, 120, 16),
-      new THREE.MeshStandardMaterial({ color: 0x8a4a3a, roughness: 0.6 }), 1500, 680, -2200);
+      new THREE.MeshStandardMaterial({ color: 0x8a4a3a, roughness: 0.6 }), 1750, 680, -1650);
     windBlades = new THREE.Group();
-    windBlades.position.set(1500, 600, -2110);
+    windBlades.position.set(1750, 600, -1560);
     scene.add(windBlades);
     const bladeM = new THREE.MeshStandardMaterial({ color: 0xf0e6cc, roughness: 0.5, side: THREE.DoubleSide });
     const tipM = new THREE.MeshStandardMaterial({ color: 0xc84838, roughness: 0.5 });
@@ -79,7 +79,7 @@ window.GAMES.camera = (() => {
     birdWingR = G3.add(bird, wingG, birdM, 0, 6, 40);
     /* 太陽と雲 */
     G3.add(scene, new THREE.SphereGeometry(120, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xfff2c0 }), 900, 1500, -3200);
+      new THREE.MeshBasicMaterial({ color: 0xfff2c0 }), 2200, 1500, -2600);
     cloudG = new THREE.Group();
     scene.add(cloudG);
     const cloudM = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 1 });
@@ -249,7 +249,7 @@ window.GAMES.camera = (() => {
     time += dt;
     windBlades.rotation.z += dt * (0.9 + Math.sin(time * 0.23) * 0.55);
     const ba = time * 0.55;
-    bird.position.set(900 + Math.cos(ba) * 420, 760 + Math.sin(ba * 1.7) * 90, -2050 + Math.sin(ba) * 260);
+    bird.position.set(1250 + Math.cos(ba) * 420, 760 + Math.sin(ba * 1.7) * 90, -1550 + Math.sin(ba) * 260);
     bird.rotation.y = -ba + Math.PI / 2;
     const flap = Math.sin(time * 9) * 0.7;
     birdWingL.rotation.x = flap;
@@ -474,7 +474,7 @@ window.GAMES.camera = (() => {
     tickWorld(dt);
 
     /* カメラの向き (基本姿勢: レンズはやや左奥 = 断面の右側面が手前を向く) */
-    camG.rotation.y = -0.55 + aim.yaw;
+    camG.rotation.y = -0.75 + aim.yaw;
     camG.rotation.x = aim.pitch;
 
     /* 巻き上げレバーとフィルム送り */
@@ -560,7 +560,7 @@ window.GAMES.camera = (() => {
       stage3 = G3.createStage(el, {
         target: new THREE.Vector3(0, 330, -100),
         radius: 1500, radiusPortraitBase: 1350, radiusMaxPortrait: 2400,
-        az: 0.3, po: 1.12,
+        az: 0.62, po: 1.12,
       });
       build();
       whirr = S.whirrLoop();
