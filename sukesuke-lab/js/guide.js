@@ -73,12 +73,12 @@ window.GUIDE = (() => {
     /* ふちどり (少し大きい暗色を背面に) */
     const oBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.38, tipLen, 6, 12), edgeMat);
     oBody.position.copy(fBody.position);
-    oBody.renderOrder = -1;
     const oFist = new THREE.Mesh(new THREE.SphereGeometry(0.72, 14, 10), edgeMat);
     oFist.position.copy(fist.position);
     oFist.scale.copy(fist.scale);
-    oFist.renderOrder = -1;
     finger.add(oBody, oFist, fBody, fist);
+    finger.userData.outlines = [oBody, oFist];
+    finger.userData.fills = [fBody, fist];
     group.add(finger);
 
     /* ドラッグ用のシェブロン矢印 (進行方向へ流れる) */
@@ -102,6 +102,9 @@ window.GUIDE = (() => {
     group.add(arc);
 
     group.traverse(o => { o.renderOrder = 999; });
+    /* 指のふちどりは本体より先に描く (白がふちの上に乗るように) */
+    finger.userData.outlines.forEach(o => { o.renderOrder = 998; });
+    finger.userData.fills.forEach(o => { o.renderOrder = 1000; });
     group.visible = false;
   }
 
@@ -176,9 +179,10 @@ window.GUIDE = (() => {
         ringMat.opacity = 0.85 * (1 - g);
       }
     } else if (st.kind === 'drag') {
+      const a = p.clone();          /* posOf は共有ベクトルを返すので先に確定させる */
       const q = posOf(st.to);
       if (q) {
-        const a = p.clone(), b = q.clone();
+        const b = q.clone();
         /* 指がAからBへ動き続ける */
         const t = (anim % 1.6) / 1.6;
         const ease = t < 0.15 ? 0 : t > 0.85 ? 1 : (t - 0.15) / 0.7;
@@ -193,7 +197,7 @@ window.GUIDE = (() => {
           const f = (i + 1) / 6;
           c.position.copy(a).addScaledVector(dir, len * f);
           c.quaternion.copy(quat);
-          c.scale.setScalar(R * 0.55);
+          c.scale.setScalar(R * 0.75);
           chevMats[i].opacity = 0.25 + 0.6 * Math.max(0, Math.sin(anim * 5 - i * 1.1));
         });
         /* 輪はスタート地点に */
