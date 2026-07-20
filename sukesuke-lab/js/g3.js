@@ -57,6 +57,26 @@ const G3 = {
       camera.lookAt(orbit.target);
     };
 
+    /* テスト用: 最新ステージのワールド座標→スクリーン座標 */
+    window.__proj = (x, y, z) => {
+      applyCamera();
+      const v = new THREE.Vector3(x, y, z).project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height];
+    };
+    /* テスト用: 名前付きオブジェクトのスクリーン座標 */
+    window.__pts = {};
+    window.__pt = (name) => {
+      const obj = window.__pts[name];
+      if (!obj) return null;
+      applyCamera();
+      const v = new THREE.Vector3();
+      obj.getWorldPosition(v);
+      v.project(camera);
+      const r = renderer.domElement.getBoundingClientRect();
+      return [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height];
+    };
+
     const dispose = () => {
       window.removeEventListener('resize', resize);
       scene.traverse(o => {
