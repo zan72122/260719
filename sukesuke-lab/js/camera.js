@@ -136,7 +136,7 @@ window.GAMES.camera = (() => {
     curtainB = G3.add(camG, new THREE.BoxGeometry(150, 90, 3), curtM, 0, 95, 62);
     /* フィルム: パトローネ(左)→ゲート→スプロケット→巻き取り(右) */
     const canM = new THREE.MeshStandardMaterial({ color: 0x2a2e33, metalness: 0.8, roughness: 0.35 });
-    spoolL = G3.add(camG, new THREE.CylinderGeometry(52, 52, 130, 20), canM, -180, 0, 60);
+    spoolL = G3.add(camG, new THREE.CylinderGeometry(52, 52, 130, 20), canM, -185, 0, 60);
     spoolR = G3.add(camG, new THREE.CylinderGeometry(40, 40, 130, 20),
       new THREE.MeshStandardMaterial({ color: 0x6a4324, roughness: 0.5 }), 185, 0, 60);
     sprocket = G3.add(camG, new THREE.CylinderGeometry(26, 26, 120, 8), mats.brass, 120, 0, 60);
@@ -195,7 +195,7 @@ window.GAMES.camera = (() => {
       new THREE.MeshStandardMaterial({ color: 0xc03030 }), -95, 172, -14).rotation.x = Math.PI;
     /* 巻き戻しクランク */
     crankG = new THREE.Group();
-    crankG.position.set(-180, 168, 60);
+    crankG.position.set(-215, 168, 60);
     camG.add(crankG);
     G3.add(crankG, new THREE.CylinderGeometry(16, 16, 20, 16), mats.chrome, 0, 0, 0);
     const arm = G3.add(crankG, new THREE.BoxGeometry(52, 8, 14), mats.chrome, 22, 10, 0);
@@ -208,9 +208,15 @@ window.GAMES.camera = (() => {
     const cwin = new THREE.Mesh(new THREE.PlaneGeometry(56, 34),
       new THREE.MeshBasicMaterial({ map: counterTex }));
     cwin.position.set(210, 168.5, 20);
-    cwin.rotation.x = -Math.PI / 2;
+    cwin.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
     camG.add(cwin);
     drawCounter();
+    /* フィルムゲートの枠 (シャッター幕のまわり) */
+    const gateM = new THREE.MeshStandardMaterial({ color: 0x33373c, roughness: 0.5 });
+    G3.add(camG, new THREE.BoxGeometry(160, 12, 10), gateM, 0, 52, 64);
+    G3.add(camG, new THREE.BoxGeometry(160, 12, 10), gateM, 0, -52, 64);
+    G3.add(camG, new THREE.BoxGeometry(12, 116, 10), gateM, -80, 0, 64);
+    G3.add(camG, new THREE.BoxGeometry(12, 116, 10), gateM, 80, 0, 64);
 
     /* --- 撮影用カメラ + 写る範囲の線 --- */
     capCam = new THREE.PerspectiveCamera(34, CAPW / CAPH, 10, 20000);
