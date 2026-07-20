@@ -300,6 +300,7 @@ window.GAMES.kaisatsu = (() => {
       t0: +tickets[0].t.toFixed(2), s0: tickets[0].state,
       t1: +tickets[1].t.toFixed(2), s1: tickets[1].state, flap: flapOpen > 0,
     });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -327,12 +328,23 @@ window.GAMES.kaisatsu = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: 切符をスロットへ */
+      let gdIn = false;
+      GUIDE.start(stage3, [
+        {
+          kind: 'drag', at: () => tickets[0].hit, to: () => window.__pts.slotIn,
+          when: () => tickets[0].state === 'tray',
+          done: () => (gdIn = gdIn || tickets.some(t => t.state === 'in')),
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (servo) servo.stop();
       stage3.dispose();
       stage3 = null;

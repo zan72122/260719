@@ -535,6 +535,7 @@ window.GAMES.umbrella = (() => {
       if (!landedWet) groundTex.needsUpdate = true;
     }
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -574,12 +575,24 @@ window.GAMES.umbrella = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: ボタンで開く → かたむける */
+      GUIDE.start(stage3, [
+        { kind: 'tap', at: () => btnHit, done: () => open.p > 0.5 },
+        { kind: 'drag', at: () => shaftHit, to: () => {
+          const v = new THREE.Vector3();
+          shaftHit.getWorldPosition(v);
+          v.x -= 90;
+          return v;
+        }, done: () => Math.abs(tilt.t) > 0.12 },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (rainSnd) rainSnd.stop();
       stage3.dispose();
       stage3 = null;

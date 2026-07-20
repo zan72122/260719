@@ -476,6 +476,7 @@ window.GAMES.pump = (() => {
       }
     }
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -507,12 +508,18 @@ window.GAMES.pump = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: ヘッドを押す */
+      GUIDE.start(stage3, [
+        { kind: 'hold', at: () => headHit, done: () => pile.length > 0 || splats.length > 0 },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       stage3.dispose();
       stage3 = null;
       scene = null;

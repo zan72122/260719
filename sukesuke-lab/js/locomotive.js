@@ -351,6 +351,7 @@ window.GAMES.locomotive = (() => {
     if (smoke.instanceColor) smoke.instanceColor.needsUpdate = true;
 
     if (window.__dbgLC) window.__dbgLC({ fire: +fire.toFixed(2), p: +pressure.toFixed(2), reg: +regulator.toFixed(2), spd: speed | 0 });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -380,12 +381,28 @@ window.GAMES.locomotive = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: 石炭をくべる → 圧力が上がったら加減弁 */
+      GUIDE.start(stage3, [
+        { kind: 'tap', at: () => coalHit, done: () => fire > 0.5 },
+        {
+          kind: 'drag', at: () => leverHit,
+          to: () => {
+            const v = new THREE.Vector3();
+            leverHit.getWorldPosition(v);
+            v.x += 160;
+            return v;
+          },
+          when: () => pressure > 0.45, done: () => regulator > 0.25,
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (ventSnd) ventSnd.stop();
       if (fireSnd) fireSnd.stop();
       stage3.dispose();

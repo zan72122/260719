@@ -279,6 +279,7 @@ window.GAMES.elevator = (() => {
     }
 
     if (window.__dbgEL) window.__dbgEL({ carY: carY | 0, target: targetF, q: queue.join(''), load, door: +doorOpen.toFixed(2) });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -311,12 +312,27 @@ window.GAMES.elevator = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: 呼びボタン → 荷物をカゴへ */
+      let gdCalled = false, gdLoaded = false;
+      GUIDE.start(stage3, [
+        {
+          kind: 'tap', at: () => window.__pts.btn2,
+          done: () => (gdCalled = gdCalled || queue.length > 0 || targetF !== -1),
+        },
+        {
+          kind: 'drag', at: () => cargo[0].m, to: () => carG,
+          when: () => doorOpen > 0.6,
+          done: () => (gdLoaded = gdLoaded || cargo.some(c => c.inCar)),
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (servo) servo.stop();
       stage3.dispose();
       stage3 = null;

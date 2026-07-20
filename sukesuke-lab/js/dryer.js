@@ -581,6 +581,7 @@ window.GAMES.dryer = (() => {
       feather.m.rotation.y = Math.sin(time * 1.7) * 0.6;
     }
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -612,12 +613,24 @@ window.GAMES.dryer = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: スイッチを入れる → ねらいを動かす */
+      GUIDE.start(stage3, [
+        { kind: 'tap', at: () => powerHit, done: () => level > 0 },
+        { kind: 'drag', at: () => aimHit, to: () => {
+          const v = new THREE.Vector3();
+          aimHit.getWorldPosition(v);
+          v.y += 130;
+          return v;
+        }, done: () => Math.abs(aim.t) > 0.1 || Math.abs(dryerXT - PIVOT.x) > 40 },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (windSnd) windSnd.stop();
       if (humSnd) humSnd.stop();
       if (whirrSnd) whirrSnd.stop();

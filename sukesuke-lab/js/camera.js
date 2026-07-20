@@ -549,6 +549,7 @@ window.GAMES.camera = (() => {
       rewinding, rewindA, developing: developQ ? developQ.length : 0,
     });
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
   }
@@ -577,12 +578,30 @@ window.GAMES.camera = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: 巻き上げ → シャッター → 撮り切ったら巻き戻し */
+      GUIDE.start(stage3, [
+        {
+          kind: 'drag', at: () => leverG,
+          to: () => {
+            const v = new THREE.Vector3();
+            leverG.getWorldPosition(v);
+            v.x += 130;
+            v.z += 110;
+            return v;
+          },
+          when: () => !rewinding && count < MAXSHOT, done: () => cocked || count > 0,
+        },
+        { kind: 'tap', at: () => shutterBtn, when: () => cocked, done: () => count > 0 },
+        { kind: 'turn', at: () => crankG, turnDir: 1, when: () => count >= MAXSHOT, done: () => printCount > 0 },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (whirr) whirr.stop();
       stage3.dispose();
       stage3 = null;

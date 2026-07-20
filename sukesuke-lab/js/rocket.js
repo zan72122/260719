@@ -432,6 +432,7 @@ window.GAMES.rocket = (() => {
     const targetY = 420 + Math.max(0, alt);
     stage3.orbit.target.y += (targetY - stage3.orbit.target.y) * Math.min(1, dt * 3);
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -463,12 +464,27 @@ window.GAMES.rocket = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: レバー2本 → 点火 → 切り離し */
+      const up = (obj, dy) => () => {
+        const v = new THREE.Vector3();
+        obj().getWorldPosition(v);
+        v.y += dy;
+        return v;
+      };
+      GUIDE.start(stage3, [
+        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV > 0.5 },
+        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV > 0.5 },
+        { kind: 'tap', at: () => ignBtn, when: () => phase === 'idle', done: () => phase !== 'idle' },
+        { kind: 'tap', at: () => rocketHit, when: () => phase === 'fly' && !sep && alt > 600, done: () => sep },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (rumble) rumble.stop();
       stage3.dispose();
       stage3 = null;

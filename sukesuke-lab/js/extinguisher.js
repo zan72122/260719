@@ -334,6 +334,7 @@ window.GAMES.extinguisher = (() => {
     if (smoke.instanceColor) smoke.instanceColor.needsUpdate = true;
 
     if (window.__dbgEX) window.__dbgEX({ pin: pinOut, p: +pressure.toFixed(2), fire: +total.toFixed(2) });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -364,12 +365,30 @@ window.GAMES.extinguisher = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: ピンを抜く → レバーを握る → 火にねらう */
+      GUIDE.start(stage3, [
+        {
+          kind: 'drag', at: () => pinHit,
+          to: () => {
+            const v = new THREE.Vector3();
+            pinHit.getWorldPosition(v);
+            v.x += 170;
+            v.y += 40;
+            return v;
+          },
+          done: () => pinOut,
+        },
+        { kind: 'hold', at: () => leverHit, when: () => pinOut, done: () => pressure < 0.97 },
+        { kind: 'drag', at: () => nozzleG, to: () => cells[1].g, when: () => pinOut, done: () => pressure < 0.72 },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (spraySnd) spraySnd.stop();
       if (fireSnd) fireSnd.stop();
       stage3.dispose();
