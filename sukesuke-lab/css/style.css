@@ -31,10 +31,20 @@ html, body {
 
 /* ---------- home ---------- */
 
+/* 14枚のカードがならぶので、ホームだけ縦スクロールできる */
+#home {
+  justify-content: flex-start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  padding: max(3vmin, env(safe-area-inset-top)) 0 8vmin;
+}
+
 #title {
   font-size: clamp(26px, 5vmin, 56px);
   color: #43484f;
-  margin-bottom: 4vmin;
+  margin: 2vmin 0 4vmin;
   letter-spacing: 0.1em;
   text-shadow: 0 2px 0 rgba(255, 255, 255, 0.8);
 }
@@ -43,13 +53,14 @@ html, body {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 3.2vmin;
-  width: min(88vw, 92vh);
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2.6vmin;
+  width: min(92vw, 100vh);
+  flex-shrink: 0;
 }
 
 @media (orientation: landscape) {
-  .cards { grid-template-columns: repeat(4, 1fr); width: min(94vw, 170vh); }
+  .cards { grid-template-columns: repeat(5, 1fr); width: min(94vw, 190vh); }
 }
 
 .card {
