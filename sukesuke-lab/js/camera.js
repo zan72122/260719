@@ -336,17 +336,19 @@ window.GAMES.camera = (() => {
       -((e.clientY - r.top) / r.height) * 2 + 1);
     const rc = new THREE.Raycaster();
     rc.setFromCamera(p, stage3.camera);
-    const test = (obj, rad) => {
-      const v = new THREE.Vector3();
+    /* いちばん近い操作部を選ぶ (ダイヤルとクランクが並んでいるため) */
+    const cand = [
+      ['shutter', shutterBtn, 60], ['lever', leverG, 70], ['dial', dialG, 62],
+      ['crank', crankG, 66], ['aim', camG, 330],
+    ];
+    let best = null, bestScore = 1;
+    const v = new THREE.Vector3();
+    for (const [name, obj, rad] of cand) {
       obj.getWorldPosition(v);
-      return rc.ray.distanceToPoint(v) < rad;
-    };
-    if (test(shutterBtn, 55)) return 'shutter';
-    if (test(leverG, 70)) return 'lever';
-    if (test(dialG, 62)) return 'dial';
-    if (test(crankG, 62)) return 'crank';
-    if (test(camG, 330)) return 'aim';
-    return null;
+      const score = rc.ray.distanceToPoint(v) / rad;
+      if (score < bestScore) { bestScore = score; best = name; }
+    }
+    return best;
   }
 
   function fireShutter() {
