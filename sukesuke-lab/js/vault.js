@@ -414,6 +414,7 @@ window.GAMES.vault = (() => {
       doorA: doorA.t, openness,
     });
 
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
   }
@@ -451,12 +452,32 @@ window.GAMES.vault = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: ダイヤルで円盤を1枚ずつ → ハンドル → 扉 */
+      GUIDE.start(stage3, [
+        { kind: 'turn', at: () => dialMesh, turnDir: 1, done: () => alignedDisc(2) || boltT > 0.1 },
+        { kind: 'turn', at: () => dialMesh, turnDir: -1, done: () => alignedDisc(1) || boltT > 0.1 },
+        { kind: 'turn', at: () => dialMesh, turnDir: 1, done: () => alignedDisc(0) || boltT > 0.1 },
+        { kind: 'turn', at: () => handleG, turnDir: 1, when: () => fenceDropped, done: () => boltT > 0.95 },
+        {
+          kind: 'drag', at: () => window.__pts.doorEdge,
+          to: () => {
+            const v = new THREE.Vector3();
+            window.__pts.doorEdge.getWorldPosition(v);
+            v.x -= 350;
+            v.z += 200;
+            return v;
+          },
+          when: () => boltT > 0.9, done: () => doorA.t > 0.8,
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (servo) servo.stop();
       if (rumble) rumble.stop();
       stage3.dispose();

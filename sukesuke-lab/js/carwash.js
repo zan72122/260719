@@ -348,6 +348,7 @@ window.GAMES.carwash = (() => {
     if (dropMesh.instanceColor) dropMesh.instanceColor.needsUpdate = true;
 
     if (window.__dbgCW) window.__dbgCW({ phase, x: carX | 0 });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -379,12 +380,19 @@ window.GAMES.carwash = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: コインを入れる → おわったら車をタップ */
+      GUIDE.start(stage3, [
+        { kind: 'drag', at: () => coinHit, to: () => window.__pts.slot, when: () => phase === 'idle', done: () => phase !== 'idle' },
+        { kind: 'tap', at: () => carHit, when: () => phase === 'done', done: () => phase !== 'done' },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (servo) servo.stop();
       if (brushSnd) brushSnd.stop();
       if (blowSnd) blowSnd.stop();

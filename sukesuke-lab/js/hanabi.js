@@ -425,6 +425,7 @@ window.GAMES.hanabi = (() => {
     stage3.orbit.target.y += (camY - stage3.orbit.target.y) * Math.min(1, dt * 2.2);
 
     if (window.__dbgHB) window.__dbgHB(phase, packed.length);
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -454,12 +455,29 @@ window.GAMES.hanabi = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: 星を詰める → 蓋 → 点火 */
+      GUIDE.start(stage3, [
+        {
+          kind: 'drag', at: () => trayHits[0], to: () => new THREE.Vector3(390, 280, 300),
+          when: () => phase === 'pack', done: () => packed.length > 0,
+        },
+        {
+          kind: 'tap', at: () => lidHit,
+          when: () => phase === 'pack' && packed.length > 2, done: () => phase !== 'pack',
+        },
+        {
+          kind: 'tap', at: () => torchG.userData.hit,
+          when: () => phase === 'loaded', done: () => phase === 'burning' || phase === 'flying' || phase === 'burst',
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (fuseSnd) fuseSnd.stop();
       stage3.dispose();
       stage3 = null;

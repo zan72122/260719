@@ -360,6 +360,7 @@ window.GAMES.crane = (() => {
     flap.rotation.x = -(flap.userData.openT || 0) * 0.9;
 
     if (window.__dbgCR) window.__dbgCR({ phase, credits, x: gantryX | 0, z: gantryZ | 0, won: prizes.filter(p => p.won).length });
+    GUIDE.tick(dt);
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -393,12 +394,35 @@ window.GAMES.crane = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: コイン → スティック → ボタン */
+      let gdMoved = false, gdDropped = false;
+      GUIDE.start(stage3, [
+        { kind: 'drag', at: () => coinHit, to: () => window.__pts.slot, when: () => phase === 'idle', done: () => phase !== 'idle' },
+        {
+          kind: 'drag', at: () => stickHit,
+          to: () => {
+            const v = new THREE.Vector3();
+            stickHit.getWorldPosition(v);
+            v.x += 130;
+            v.z -= 110;
+            return v;
+          },
+          when: () => phase === 'play',
+          done: () => (gdMoved = gdMoved || (phase === 'play' && stickId !== null)),
+        },
+        {
+          kind: 'tap', at: () => btnHit, when: () => phase === 'play',
+          done: () => (gdDropped = gdDropped || phase === 'drop'),
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       if (servo) servo.stop();
       stage3.dispose();
       stage3 = null;

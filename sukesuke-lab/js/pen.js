@@ -613,6 +613,7 @@ window.GAMES.pen = (() => {
     camera.position.setFromSpherical(sp).add(orbit.target);
     camera.lookAt(orbit.target);
 
+    GUIDE.tick(dt);
     renderer.render(scene, camera);
     raf = requestAnimationFrame(loop);
   }
@@ -677,12 +678,24 @@ window.GAMES.pen = (() => {
       renderer.domElement.addEventListener('pointerup', onUp);
       renderer.domElement.addEventListener('pointercancel', onUp);
 
+      /* 4歳向けガイド: ノック → 紙に書く */
+      GUIDE.start({ scene, camera, orbit, renderer }, [
+        { kind: 'tap', at: () => knockHit, r: 16, done: () => engaged },
+        {
+          kind: 'drag', r: 13,
+          at: () => new THREE.Vector3(60, 6, 35),
+          to: () => new THREE.Vector3(115, 6, -12),
+          done: () => inkUse > 60,
+        },
+      ]);
+
       prev = performance.now();
       raf = requestAnimationFrame(loop);
     },
 
     stop() {
       cancelAnimationFrame(raf);
+      GUIDE.stop();
       scratchStop();
       window.removeEventListener('resize', resizeHandler);
       scene.traverse(o => {
