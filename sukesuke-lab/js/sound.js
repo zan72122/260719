@@ -193,10 +193,67 @@ const S = (() => {
       hiss(0.28, 0.05, 700, 0.03);
     },
 
-    /* 小さな液だまりに落ちるピチャ */
-    plip() {
-      blip('sine', 950, 320, 0.05, 0.12);
-      hiss(0.05, 0.04, 2600, 0.01);
+    /* 小さな液だまりに落ちるピチャ (k: ピッチ倍率 0.5=低くて重い) */
+    plip(k) {
+      k = k || 1;
+      blip('sine', 950 * k, 320 * k, 0.05, 0.12);
+      hiss(0.05, 0.04, 2600 * k, 0.01);
+    },
+
+    /* 骨先などから垂れる滴のポチャ */
+    drip() {
+      blip('sine', 620, 210, 0.07, 0.1);
+    },
+
+    /* 紙をめくるサッ */
+    flipPage() {
+      hiss(0.16, 0.16, 1600);
+      hiss(0.1, 0.1, 900, 0.09);
+    },
+
+    /* 空気を吸ってスパスパいうポンプ */
+    sputter() {
+      hiss(0.06, 0.16, 1900);
+      blip('triangle', 300, 90, 0.08, 0.14, 0.04);
+      hiss(0.05, 0.1, 2400, 0.11);
+    },
+
+    /* 風車のヒュンヒュン。set(回転の速さ0〜1)、stop() */
+    whirrLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = 900;
+      f.Q.value = 2.2;
+      const lfo = c.createOscillator();
+      const lg = c.createGain();
+      lfo.frequency.value = 4;
+      lg.gain.value = 300;
+      lfo.connect(lg).connect(f.frequency);
+      lfo.start();
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          const t = c.currentTime;
+          g.gain.setTargetAtTime(Math.min(level, 1) * 0.07, t, 0.15);
+          lfo.frequency.setTargetAtTime(2 + level * 14, t, 0.15);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.1);
+          try { src.stop(c.currentTime + 0.4); lfo.stop(c.currentTime + 0.4); } catch (e) { /* stopped */ }
+        },
+      };
     },
 
     /* 低いコトッという着座音 */

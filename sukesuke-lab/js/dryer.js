@@ -16,11 +16,12 @@ window.GAMES.dryer = (() => {
   let stage3, scene, raf, prev, time;
   let dryerG, fanG, heaterMats, heatLight, powerKnob, heatKnob, heatDotR, heatDotB;
   let aimHit, powerHit, heatHit;
-  let aim, level, hot;
+  let aim, level, hot, windEff, sndLevel;
+  let dryerX, dryerXT;
   let airMesh, airState, dummy;
-  let ribbons, ribbonMeshes, balls;
+  let ribbons, ribbonMeshes, balls, confetti, pinwheel, feather;
   let aimId, aimFrom, orbitId, orbitFrom;
-  let windSnd, humSnd, thudT;
+  let windSnd, humSnd, whirrSnd, thudT;
   let mats;
 
   /* ---------------- 組み立て ---------------- */
@@ -193,6 +194,61 @@ window.GAMES.dryer = (() => {
       const m = G3.add(scene, new THREE.SphereGeometry(16, 24, 18), foam, x, 16, z);
       balls.push({ m, x, y: 16, z, vx: 0, vy: 0, vz: 0 });
     });
+
+    /* --- 紙吹雪 (軽い紙片。温風なら舞い上がり、冷風なら押し流される) --- */
+    const confCols = [0xd94b57, 0xe8a33b, 0x4d9e6a, 0x4a7fc9, 0xb56bb0];
+    confetti = [];
+    for (let i = 0; i < 14; i++) {
+      const cm = new THREE.MeshStandardMaterial({
+        color: confCols[i % confCols.length], roughness: 0.75,
+        side: THREE.DoubleSide, envMapIntensity: 0.3,
+      });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(13, 13), cm);
+      const x = 220 + (i % 5) * 26, z = -110 + Math.floor(i / 5) * 74 + (i % 3) * 12;
+      m.position.set(x, 0.8, z);
+      m.rotation.x = -Math.PI / 2;
+      m.castShadow = true;
+      scene.add(m);
+      confetti.push({ m, x, y: 0.8, z, vx: 0, vy: 0, vz: 0, wx: 0, wz: 0, ph: i * 1.7 });
+    }
+
+    /* --- 風車 (風を受けた回転が蓄積し、慣性でゆっくり減速) --- */
+    pinwheel = { spinVel: 0 };
+    const pwX = 390, pwZ = 120;
+    G3.add(scene, new THREE.CylinderGeometry(3.5, 3.5, 250, 12), mats.chrome, pwX, 125, pwZ);
+    G3.add(scene, new THREE.BoxGeometry(56, 6, 30), mats.darkPlastic, pwX, 3, pwZ);
+    const pwG = new THREE.Group();
+    pwG.position.set(pwX, 255, pwZ);
+    pwG.rotation.y = 0.5;   /* すこしカメラへ向ける (風も受かる角度) */
+    scene.add(pwG);
+    G3.add(pwG, new THREE.SphereGeometry(5, 12, 10), mats.chrome, 0, 0, 0);
+    pinwheel.wheel = new THREE.Group();
+    pwG.add(pinwheel.wheel);
+    for (let i = 0; i < 6; i++) {
+      const bm = new THREE.MeshStandardMaterial({
+        color: confCols[i % 3 === 0 ? 0 : i % 3 === 1 ? 1 : 3],
+        roughness: 0.6, side: THREE.DoubleSide, envMapIntensity: 0.35,
+      });
+      const bg = new THREE.Group();
+      bg.rotation.x = (i / 6) * Math.PI * 2;
+      pinwheel.wheel.add(bg);
+      const blade = new THREE.Mesh(new THREE.PlaneGeometry(30, 44), bm);
+      blade.position.set(0, 36, 0);
+      blade.rotation.y = 0.6;   /* 羽根のひねり */
+      blade.castShadow = true;
+      bg.add(blade);
+    }
+    pinwheel.pos = new THREE.Vector3(pwX, 255, pwZ);
+
+    /* --- 羽根 (超軽量: 風でどこまでも飛ぶ) --- */
+    const fGeo = new THREE.SphereGeometry(9, 10, 8);
+    fGeo.scale(2.6, 0.22, 1);
+    feather = {
+      m: new THREE.Mesh(fGeo, new THREE.MeshStandardMaterial({ color: 0xf7f5ef, roughness: 0.85, side: THREE.DoubleSide })),
+      x: 320, y: 30, z: 110, vx: 0, vy: 0, vz: 0,
+    };
+    feather.m.castShadow = true;
+    scene.add(feather.m);
   }
 
   function addRod(rodX, rodY) {
@@ -212,22 +268,22 @@ window.GAMES.dryer = (() => {
   function nozzleWorld() {
     const a = aim.p;
     return {
-      ox: PIVOT.x + Math.cos(a) * NOZZLE_X,
-      oy: PIVOT.y + Math.sin(a) * NOZZLE_X,
+      ox: dryerG.position.x + Math.cos(a) * NOZZLE_X,
+      oy: dryerG.position.y + Math.sin(a) * NOZZLE_X,
       dx: Math.cos(a),
       dy: Math.sin(a),
     };
   }
 
   function windForceAt(px, py, pz) {
-    if (level === 0) return 0;
+    if (windEff < 0.03) return 0;
     const n = nozzleWorld();
     const rx = px - n.ox, ry = py - n.oy;
     const t = rx * n.dx + ry * n.dy;
     if (t < 0) return 0;
     const perp = Math.hypot(rx * -n.dy + ry * n.dx, pz);
     const width = 58 + t * 0.5;
-    return (level / 2) * Math.max(0, 1 - perp / width) * Math.max(0, 1 - t / 950);
+    return (windEff / 2) * Math.max(0, 1 - perp / width) * Math.max(0, 1 - t / 950);
   }
 
   /* ---------------- 入力 ---------------- */
@@ -235,9 +291,8 @@ window.GAMES.dryer = (() => {
   function setPower(n) {
     level = n;
     S.clickReal(0.8);
-    windSnd.set(level / 2);
-    humSnd.set(level / 2);
     if (level > 0) S.whoosh(level / 2);
+    /* 風量そのものはファンのスプール (windEff) がゆっくり追従する */
   }
 
   function onDown(e) {
@@ -246,7 +301,7 @@ window.GAMES.dryer = (() => {
     if (ray.intersectObject(heatHit, false).length) { hot = !hot; S.clickReal(0.7); return; }
     if (aimId === null && ray.intersectObject(aimHit, false).length) {
       aimId = e.pointerId;
-      aimFrom = { y: e.clientY, a: aim.t };
+      aimFrom = { y: e.clientY, a: aim.t, x: e.clientX, px: dryerXT };
       return;
     }
     if (orbitId === null) {
@@ -258,7 +313,9 @@ window.GAMES.dryer = (() => {
   function onMove(e) {
     if (e.pointerId === aimId) {
       const r = stage3.renderer.domElement.getBoundingClientRect();
+      /* 上下=ねらいの角度、左右=前後の距離 */
       aim.t = U.clamp(aimFrom.a - ((e.clientY - aimFrom.y) / r.height) * 1.6, -0.3, 0.55);
+      dryerXT = U.clamp(aimFrom.px + ((e.clientX - aimFrom.x) / r.width) * 520, -140, 190);
     } else if (e.pointerId === orbitId) {
       stage3.orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.55, 1.25);
       stage3.orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.8, 1.5);
@@ -280,9 +337,21 @@ window.GAMES.dryer = (() => {
 
     U.stepSpring(aim, dt, 170, 13);
     dryerG.rotation.z = aim.p;
+    /* 左右ドラッグでドライヤーが前後する */
+    dryerX += (dryerXT - dryerX) * Math.min(1, dt * 8);
+    dryerG.position.x = dryerX;
+
+    /* ファンのスプール: スイッチを入れても風はゆっくり立ち上がる。
+       スイッチを刻むと風のパルスが作れる */
+    windEff += (level - windEff) * Math.min(1, dt * 1.6);
+    if (Math.abs(windEff / 2 - sndLevel) > 0.02) {
+      sndLevel = windEff / 2;
+      windSnd.set(sndLevel);
+      humSnd.set(sndLevel);
+    }
 
     /* ファンとヒーター */
-    fanG.rotation.x -= (level * 14 + (level ? 4 : 0)) * dt;
+    fanG.rotation.x -= (windEff * 14 + (windEff > 0.05 ? 4 : 0)) * dt;
     const glow = hot && level > 0 ? 1 : 0;
     heaterMats.forEach(hm => {
       hm.emissiveIntensity += (glow * (1.1 + 0.15 * Math.sin(time * 7)) - hm.emissiveIntensity) * Math.min(1, dt * 5);
@@ -295,7 +364,7 @@ window.GAMES.dryer = (() => {
 
     /* --- 空気の流線 --- */
     const a = aim.p, ca = Math.cos(a), sa = Math.sin(a);
-    const spawnN = level > 0 ? Math.floor(level * 40 * dt + Math.random()) : 0;
+    const spawnN = windEff > 0.05 ? Math.floor(windEff * 40 * dt + Math.random()) : 0;
     let spawned = 0;
     const cold = new THREE.Color(0x2f8fe8), warm = new THREE.Color(0xf06a10), gray = new THREE.Color(0x8a9daa);
     for (let i = 0; i < AIR_N; i++) {
@@ -305,7 +374,7 @@ window.GAMES.dryer = (() => {
           spawned++;
           p.on = true; p.world = false;
           p.x = -102; p.y = U.rand(-24, 24); p.z = U.rand(-24, 24);
-          p.v = 260 + level * 190;
+          p.v = 260 + windEff * 190;
           p.age = 0;
           airMesh.setColorAt(i, gray);
         } else {
@@ -316,7 +385,7 @@ window.GAMES.dryer = (() => {
         }
       }
       if (!p.world) {
-        p.v = Math.min(p.v + 1300 * dt, 380 + level * 320);
+        p.v = Math.min(p.v + 1300 * dt, 380 + windEff * 320);
         p.x += p.v * dt;
         p.y *= 1 - dt * 2.2;
         p.z *= 1 - dt * 2.2;
@@ -324,8 +393,8 @@ window.GAMES.dryer = (() => {
         if (p.x > NOZZLE_X) {
           p.world = true;
           airMesh.setColorAt(i, hot ? warm : cold);
-          const wx = PIVOT.x + p.x * ca - p.y * sa;
-          const wy = PIVOT.y + p.x * sa + p.y * ca;
+          const wx = dryerG.position.x + p.x * ca - p.y * sa;
+          const wy = dryerG.position.y + p.x * sa + p.y * ca;
           const sp = p.v * U.rand(1, 1.25);
           const wob = U.rand(-40, 40);
           p.x = wx; p.y = wy;
@@ -333,8 +402,8 @@ window.GAMES.dryer = (() => {
           p.vy = sp * sa + wob * ca;
           p.vz = U.rand(-30, 30);
         }
-        const wx = PIVOT.x + p.x * ca - p.y * sa;
-        const wy = PIVOT.y + p.x * sa + p.y * ca;
+        const wx = dryerG.position.x + p.x * ca - p.y * sa;
+        const wy = dryerG.position.y + p.x * sa + p.y * ca;
         dummy.position.set(wx, wy, p.z);
         dummy.rotation.set(0, 0, a);
       } else {
@@ -420,6 +489,98 @@ window.GAMES.dryer = (() => {
       b.m.rotation.x += (b.vz / 16) * dt;
     });
 
+    /* 球どうしの衝突 (弾性反発) */
+    for (let i = 0; i < balls.length; i++) {
+      for (let j = i + 1; j < balls.length; j++) {
+        const A = balls[i], B = balls[j];
+        const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
+        const d = Math.hypot(dx, dy, dz);
+        if (d > 0.01 && d < 32) {
+          const nx = dx / d, ny = dy / d, nz = dz / d;
+          const push = (32 - d) / 2;
+          A.x -= nx * push; A.y = Math.max(16, A.y - ny * push); A.z -= nz * push;
+          B.x += nx * push; B.y = Math.max(16, B.y + ny * push); B.z += nz * push;
+          const rel = (B.vx - A.vx) * nx + (B.vy - A.vy) * ny + (B.vz - A.vz) * nz;
+          if (rel < 0) {
+            const imp = -rel * 0.9;
+            A.vx -= nx * imp; A.vy -= ny * imp; A.vz -= nz * imp;
+            B.vx += nx * imp; B.vy += ny * imp; B.vz += nz * imp;
+            if (imp > 90 && thudT <= 0) { thudT = 0.15; S.thunk(); }
+          }
+        }
+      }
+    }
+
+    /* --- 紙吹雪: 温風で舞い上がり、冷風で押し流され、球にも弾かれる --- */
+    confetti.forEach(c => {
+      const f = windForceAt(c.x, c.y, c.z);
+      const lift = hot ? f * 3000 : 0;
+      c.vx += f * 4600 * n.dx * dt + Math.sin(time * 7 + c.ph) * f * 500 * dt;
+      c.vy += (f * 4600 * n.dy + lift - 2600) * dt;
+      c.vz += Math.cos(time * 5 + c.ph) * (f + 0.04) * 420 * dt;
+      const drag = Math.exp(-dt * 2.4);
+      c.vx *= drag; c.vy *= drag; c.vz *= drag;
+      /* 球に弾かれる */
+      for (const b of balls) {
+        const d = Math.hypot(c.x - b.x, c.y - b.y, c.z - b.z);
+        const bs = Math.hypot(b.vx, b.vz);
+        if (d < 28 && bs > 60) {
+          c.vx += b.vx * 0.7;
+          c.vz += b.vz * 0.7;
+          c.vy += 90;
+        }
+      }
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.z += c.vz * dt;
+      if (c.y < 0.8) {
+        c.y = 0.8;
+        c.vy = 0;
+        if (f < 0.1) { c.vx *= Math.exp(-dt * 6); c.vz *= Math.exp(-dt * 6); }
+      }
+      if (c.x < -140) { c.x = -140; c.vx = Math.abs(c.vx) * 0.3; }
+      if (c.x > 810) { c.x = 810; c.vx = -Math.abs(c.vx) * 0.3; }
+      if (Math.abs(c.z) > 330) { c.z = Math.sign(c.z) * 330; c.vz *= -0.3; }
+      c.m.position.set(c.x, c.y, c.z);
+      if (c.y > 2) {
+        /* 空中ではひらひら舞う */
+        c.wx += (Math.hypot(c.vx, c.vy, c.vz) * 0.02 - c.wx) * dt * 3;
+        c.m.rotation.x += c.wx * dt + Math.sin(time * 9 + c.ph) * 2.4 * dt;
+        c.m.rotation.z += Math.cos(time * 8 + c.ph) * 2 * dt;
+      } else {
+        c.m.rotation.x += (-Math.PI / 2 - (c.m.rotation.x % (Math.PI * 2))) * Math.min(1, dt * 5);
+      }
+    });
+
+    /* --- 風車: 風で回転が蓄積し、慣性でゆっくり減速 --- */
+    const pf = windForceAt(pinwheel.pos.x, pinwheel.pos.y, pinwheel.pos.z);
+    pinwheel.spinVel += pf * 17 * dt * Math.cos(0.5);
+    pinwheel.spinVel *= Math.exp(-dt * 0.25);
+    pinwheel.wheel.rotation.x -= pinwheel.spinVel * dt;
+    whirrSnd.set(U.clamp(pinwheel.spinVel / 22, 0, 1));
+
+    /* --- 羽根: 超軽量。ゆっくり落ち、風と熱でどこまでも --- */
+    {
+      const f = windForceAt(feather.x, feather.y, feather.z);
+      const lift = hot ? f * 3400 : 0;
+      feather.vx += f * 5200 * n.dx * dt;
+      feather.vy += (f * 5200 * n.dy + lift - 1500) * dt;
+      feather.vz += Math.sin(time * 3.2) * (f + 0.03) * 300 * dt;
+      const drag = Math.exp(-dt * 3.2);
+      feather.vx *= drag; feather.vy *= drag; feather.vz *= drag;
+      feather.x += feather.vx * dt;
+      feather.y += (feather.vy - 26) * dt;   /* ふわふわ沈む */
+      feather.z += feather.vz * dt;
+      if (feather.y < 2.2) { feather.y = 2.2; feather.vy = 0; }
+      if (feather.x > 860 || Math.abs(feather.z) > 360) {
+        feather.x = 250; feather.y = 230; feather.z = 100;
+        feather.vx = feather.vy = feather.vz = 0;
+      }
+      feather.m.position.set(feather.x, feather.y, feather.z);
+      feather.m.rotation.z = Math.sin(time * 2.6) * 0.5;
+      feather.m.rotation.y = Math.sin(time * 1.7) * 0.6;
+    }
+
     stage3.applyCamera();
     stage3.renderer.render(scene, stage3.camera);
     raf = requestAnimationFrame(loop);
@@ -431,7 +592,8 @@ window.GAMES.dryer = (() => {
     start(el) {
       time = 0;
       aim = U.spring(0);
-      level = 0; hot = false;
+      level = 0; hot = false; windEff = 0; sndLevel = 0;
+      dryerX = PIVOT.x; dryerXT = PIVOT.x;
       aimId = null; orbitId = null; thudT = 0;
 
       stage3 = G3.createStage(el, {
@@ -442,6 +604,7 @@ window.GAMES.dryer = (() => {
       build();
       windSnd = S.wind();
       humSnd = S.humLoop();
+      whirrSnd = S.whirrLoop();
 
       const dom = stage3.renderer.domElement;
       dom.addEventListener('pointerdown', onDown);
@@ -457,6 +620,7 @@ window.GAMES.dryer = (() => {
       cancelAnimationFrame(raf);
       if (windSnd) windSnd.stop();
       if (humSnd) humSnd.stop();
+      if (whirrSnd) whirrSnd.stop();
       stage3.dispose();
       stage3 = null;
       scene = null;

@@ -18,8 +18,12 @@ window.GAMES.umbrella = (() => {
   let open, flip, tilt;
   let openShown, thunked;
   let rainPts, rainPos, rainVel, groundTex, groundCtx, dryFadeT;
-  let wind, gustT, nextGust, flipDelay;
-  let pressBtnCool, tiltId, tiltFrom, orbitId, orbitFrom;
+  let wind, gustT, gustPower, nextGust, flipDelay;
+  let btnId, btnT0, holdDir;
+  let tiltId, tiltFrom, tiltTrack, orbitId, orbitFrom;
+  let spinVel, spinAngle, flingT;
+  let canopyWet, dripT, dripIdx, drops3d, dropMat;
+  let wetGrid, puddleSndT;
   let rainSnd, patterT;
   let mats;
 
@@ -210,6 +214,9 @@ window.GAMES.umbrella = (() => {
       color: 0xcfe0ee, depthWrite: false, sizeAttenuation: true,
     }));
     scene.add(rainPts);
+
+    /* 3D水滴の共通マテリアル */
+    dropMat = new THREE.MeshStandardMaterial({ color: 0x7fb2dd, roughness: 0.25, envMapIntensity: 0.6 });
   }
 
   function resetDrop(i, randomY) {
@@ -220,15 +227,56 @@ window.GAMES.umbrella = (() => {
     rainVel[i * 2 + 1] = 0;
   }
 
-  /* 地面をぬらす */
-  function wetGround(x, z) {
+  /* 地面をぬらす。濡れが蓄積した場所は水たまりになり、着水で波紋が立つ */
+  function wetGround(x, z, big) {
     const u = ((x + 1200) / 2400) * 512;
     const v = ((z + 1200) / 2400) * 512;
     groundCtx.fillStyle = 'rgba(38,42,48,0.18)';
     groundCtx.beginPath();
-    groundCtx.arc(u, v, U.rand(2.5, 4.5), 0, Math.PI * 2);
+    groundCtx.arc(u, v, big ? 6 : 3.5, 0, Math.PI * 2);
     groundCtx.fill();
+
+    const gx = U.clamp(Math.floor((x + 1200) / 2400 * 32), 0, 31);
+    const gz = U.clamp(Math.floor((z + 1200) / 2400 * 32), 0, 31);
+    const gi = gz * 32 + gx;
+    const was = wetGrid[gi];
+    wetGrid[gi] = Math.min(30, was + (big ? 2 : 1));
+    if (was < 12 && wetGrid[gi] >= 12) {
+      /* 水たまりが生まれる */
+      groundCtx.fillStyle = 'rgba(66,84,108,0.24)';
+      groundCtx.beginPath();
+      groundCtx.arc(u, v, 15, 0, Math.PI * 2);
+      groundCtx.fill();
+    } else if (was >= 12) {
+      /* 水たまりへの着水: 波紋 */
+      groundCtx.strokeStyle = 'rgba(150,175,200,0.3)';
+      groundCtx.lineWidth = 1.4;
+      groundCtx.beginPath();
+      groundCtx.arc(u, v, 6, 0, Math.PI * 2);
+      groundCtx.stroke();
+      groundCtx.beginPath();
+      groundCtx.arc(u, v, 11, 0, Math.PI * 2);
+      groundCtx.stroke();
+      if (puddleSndT <= 0) { puddleSndT = 0.3; S.plip(0.5); }
+    }
     groundTex.needsUpdate = true;
+  }
+
+  /* 3Dの水滴 (骨先の滴り・遠心力のしぶき) */
+  function spawnDrop3d(x, y, z, vx, vy, vz) {
+    if (drops3d.length >= 30) return;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(3.2, 8, 6), dropMat);
+    m.position.set(x, y, z);
+    scene.add(m);
+    drops3d.push({ m, vx, vy, vz });
+  }
+
+  /* いまの開き角での骨先ワールド位置 (かたむき・回転こみ) */
+  function ribTipWorld(alpha, i) {
+    const phi = (i / SECTORS) * Math.PI * 2 + spinAngle;
+    const p = ribTip(alpha, phi);
+    p.applyAxisAngle(new THREE.Vector3(0, 0, 1), umb.rotation.z);
+    return p;
   }
 
   /* ---------------- 入力 ---------------- */
@@ -236,9 +284,12 @@ window.GAMES.umbrella = (() => {
   function onDown(e) {
     const ray = stage3.setRay(e);
 
-    if (pressBtnCool <= 0 && ray.intersectObject(btnHit, false).length) {
-      pressBtnCool = 0.5;
-      toggleOpen();
+    /* ボタン: 短いタップ=バネで一気に / 長押し=押している時間ぶんだけゆっくり動く */
+    if (btnId === null && ray.intersectObject(btnHit, false).length) {
+      btnId = e.pointerId;
+      btnT0 = performance.now();
+      holdDir = open.t < 0.5 ? 1 : -1;
+      S.clickReal(0.5);
       return;
     }
     /* うらがえった生地をタップしてなおす */
@@ -248,11 +299,13 @@ window.GAMES.umbrella = (() => {
       S.flap();
       return;
     }
-    /* 傘(生地かシャフト)からのドラッグ → かたむけ */
+    /* 傘(生地かシャフト)からのドラッグ → かたむけ。フリックで回転 */
     if (tiltId === null &&
         (ray.intersectObject(canopyMesh, false).length || ray.intersectObject(shaftHit, false).length)) {
       tiltId = e.pointerId;
       tiltFrom = { x: e.clientX, rz: tilt.t };
+      tiltTrack.reset();
+      tiltTrack.push(e.clientX, e.clientY, performance.now());
       return;
     }
     if (orbitId === null) {
@@ -264,6 +317,7 @@ window.GAMES.umbrella = (() => {
   function onMove(e) {
     if (e.pointerId === tiltId) {
       tilt.t = U.clamp(tiltFrom.rz - (e.clientX - tiltFrom.x) * 0.0022, -0.42, 0.42);
+      tiltTrack.push(e.clientX, e.clientY, performance.now());
     } else if (e.pointerId === orbitId) {
       stage3.orbit.az = U.clamp(orbitFrom.az - (e.clientX - orbitFrom.x) * 0.005, -0.6, 1.3);
       stage3.orbit.po = U.clamp(orbitFrom.po - (e.clientY - orbitFrom.y) * 0.003, 0.85, 1.5);
@@ -271,8 +325,17 @@ window.GAMES.umbrella = (() => {
   }
 
   function onUp(e) {
-    if (e.pointerId === tiltId) tiltId = null;
-    else if (e.pointerId === orbitId) orbitId = null;
+    if (e.pointerId === btnId) {
+      btnId = null;
+      if (performance.now() - btnT0 < 220) toggleOpen();
+    } else if (e.pointerId === tiltId) {
+      tiltId = null;
+      /* 速い横フリックで傘がくるくる回る */
+      const v = tiltTrack.vel();
+      if (Math.abs(v.x) > 500) spinVel = U.clamp(spinVel + v.x * 0.006, -14, 14);
+    } else if (e.pointerId === orbitId) {
+      orbitId = null;
+    }
   }
 
   function toggleOpen() {
@@ -282,10 +345,23 @@ window.GAMES.umbrella = (() => {
       S.clickReal(0.8);
       S.whoosh(0.9);
     } else {
-      open.t = 0;
-      flip.t = 0;
-      S.clickReal(0.7);
-      S.flap();
+      closeUmbrella();
+    }
+  }
+
+  function closeUmbrella() {
+    open.t = 0;
+    flip.t = 0;
+    S.clickReal(0.7);
+    S.flap();
+    /* 濡れた傘を閉じると溜まった水がバサッとこぼれる */
+    if (canopyWet > 0.1) {
+      const alpha = U.lerp(0.1, 1.35, U.clamp(open.p, 0, 1.1));
+      for (let i = 0; i < SECTORS; i++) {
+        const p = ribTipWorld(alpha, i);
+        spawnDrop3d(p.x, p.y, p.z, p.x * 0.4, -80, p.z * 0.4);
+      }
+      canopyWet = 0;
     }
   }
 
@@ -295,7 +371,6 @@ window.GAMES.umbrella = (() => {
     const dt = Math.min((now - prev) / 1000, 0.033);
     prev = now;
     time += dt;
-    if (pressBtnCool > 0) pressBtnCool -= dt;
 
     U.stepSpring(open, dt, 70, 5.5);
     U.stepSpring(flip, dt, 150, 8);
@@ -308,29 +383,44 @@ window.GAMES.umbrella = (() => {
       S.flap();
     }
 
-    /* 突風 */
+    /* ボタン長押し: 押している時間ぶんだけゆっくり開閉 (途中で止められる) */
+    if (btnId !== null && performance.now() - btnT0 >= 220) {
+      open.t = U.clamp(open.t + holdDir * dt * 0.5, 0, 1);
+      if (open.t > 0.3) thunked = true;   /* 手動のときは開き切り音を出さない */
+    }
+
+    /* 突風: 強さは時刻の連続量。傾けて構えていれば裏返らない */
     nextGust -= dt;
     if (nextGust <= 0) {
       nextGust = U.rand(7, 13);
+      gustPower = 480 + 340 * Math.abs(Math.sin(time * 0.73));
       gustT = 1.6;
-      S.whoosh(1);
-      if (open.p > 0.8 && flip.t < 0.5 && Math.random() < 0.55) flipDelay = 0.4;
+      S.whoosh(U.clamp(gustPower / 800, 0.4, 1));
+      if (open.p > 0.7 && flip.t < 0.5 && gustPower > 560) flipDelay = 0.4;
     }
     if (gustT > 0) {
       gustT -= dt;
-      wind += (720 - wind) * Math.min(1, dt * 2.5);
+      wind += (gustPower * 1.25 - wind) * Math.min(1, dt * 2.5);
     } else {
       wind *= Math.exp(-dt * 1.4);
     }
     if (flipDelay >= 0) {
       flipDelay -= dt;
       if (flipDelay < 0 && open.p > 0.7) {
-        flip.t = 1;
-        S.flap();
+        if (umb.rotation.z > 0.12) {
+          /* 風上へ傾けて構えていた → 耐えた! 雨と風だけが流れる */
+          S.flap();
+        } else {
+          flip.t = 1;
+          S.flap();
+        }
       }
     }
 
-    /* 傘のかたむき (雨で自然に少しゆれる) */
+    /* かたむき + フリックの回転 (慣性つき) */
+    spinAngle += spinVel * dt;
+    spinVel *= Math.exp(-dt * 0.9);
+    umb.rotation.y = spinAngle;
     umb.rotation.z = tilt.p + Math.sin(time * 0.7) * 0.012 + wind * 0.00006;
 
     /* 骨の角度と各部品 */
@@ -353,7 +443,7 @@ window.GAMES.umbrella = (() => {
     }
 
     /* --- 雨 --- */
-    const canOpen = open.p > 0.8 && flip.p < 0.35;
+    const canOpen = open.p > 0.3 && flip.p < 0.35;   /* 半開きでも半径ぶんだけ守れる */
     const spanR = Math.sin(alpha) * RIB_LEN;
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -umb.rotation.z);
     const tmp = new THREE.Vector3();
@@ -374,6 +464,7 @@ window.GAMES.umbrella = (() => {
           const surfY = HUB_Y - Math.cos(th) * RIB_LEN * t;
           if (tmp.y < surfY + 30 && tmp.y > surfY - 45) {
             resetDrop(i);
+            canopyWet = Math.min(1, canopyWet + 0.015);   /* 生地が濡れていく */
             if (patterT <= 0) { S.tick(); patterT = 0.09; }
             continue;
           }
@@ -389,13 +480,58 @@ window.GAMES.umbrella = (() => {
     }
     rainPts.geometry.attributes.position.needsUpdate = true;
     if (patterT > 0) patterT -= dt;
+    if (puddleSndT > 0) puddleSndT -= dt;
 
-    /* 地面はゆっくり乾く */
+    /* 濡れた生地: 骨先から滴りが垂れる。回すと遠心力でしぶきが飛ぶ */
+    if (canopyWet > 0.08 && open.p > 0.5 && flip.p < 0.35) {
+      dripT -= dt * (0.4 + canopyWet * 2.2);
+      if (dripT <= 0) {
+        dripT = 1;
+        dripIdx = (dripIdx + 1) % SECTORS;
+        const p = ribTipWorld(alpha, dripIdx);
+        spawnDrop3d(p.x, p.y - 6, p.z, 0, -40, 0);
+        canopyWet = Math.max(0, canopyWet - 0.012);
+        S.drip();
+      }
+    }
+    if (canopyWet > 0.05 && Math.abs(spinVel) > 2.5) {
+      flingT -= dt;
+      if (flingT <= 0) {
+        flingT = 0.06;
+        const i = Math.floor(((spinAngle * 3) % SECTORS + SECTORS)) % SECTORS;
+        const p = ribTipWorld(alpha, i);
+        const r = Math.hypot(p.x, p.z) || 1;
+        /* 接線方向 + すこし外向きに飛ぶ */
+        const tx = -p.z / r, tz = p.x / r;
+        const sp = spinVel * r * 0.35;
+        spawnDrop3d(p.x, p.y, p.z, tx * sp + p.x * 0.5, 20, tz * sp + p.z * 0.5);
+        canopyWet = Math.max(0, canopyWet - 0.02);
+      }
+    }
+
+    /* 3D水滴の落下 */
+    for (let i = drops3d.length - 1; i >= 0; i--) {
+      const d = drops3d[i];
+      d.vy -= 2600 * dt;
+      d.m.position.x += d.vx * dt;
+      d.m.position.y += d.vy * dt;
+      d.m.position.z += d.vz * dt;
+      if (d.m.position.y < 2) {
+        wetGround(d.m.position.x, d.m.position.z, true);
+        landedWet = true;
+        scene.remove(d.m);
+        d.m.geometry.dispose();
+        drops3d.splice(i, 1);
+      }
+    }
+
+    /* 地面と水たまりはゆっくり乾く */
     dryFadeT -= dt;
     if (dryFadeT <= 0) {
       dryFadeT = 0.3;
       groundCtx.fillStyle = 'rgba(141,141,138,0.02)';
       groundCtx.fillRect(0, 0, 512, 512);
+      for (let i = 0; i < 1024; i++) wetGrid[i] = Math.max(0, wetGrid[i] - 0.12);
       if (!landedWet) groundTex.needsUpdate = true;
     }
 
@@ -414,8 +550,12 @@ window.GAMES.umbrella = (() => {
       tilt = U.spring(0);
       openShown = -1;
       thunked = true;
-      wind = 0; gustT = 0; nextGust = 6; flipDelay = -1;
-      pressBtnCool = 0; tiltId = null; orbitId = null;
+      wind = 0; gustT = 0; gustPower = 600; nextGust = 6; flipDelay = -1;
+      btnId = null; tiltId = null; orbitId = null;
+      tiltTrack = U.velTracker();
+      spinVel = 0; spinAngle = 0; flingT = 0;
+      canopyWet = 0; dripT = 1; dripIdx = 0; drops3d = [];
+      wetGrid = new Float32Array(1024); puddleSndT = 0;
       patterT = 0; dryFadeT = 0.3;
 
       stage3 = G3.createStage(el, {

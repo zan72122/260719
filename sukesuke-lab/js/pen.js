@@ -13,11 +13,13 @@ window.GAMES.pen = (() => {
   const ENGAGED_REST = 4;   // 芯が出ている間、ノックボタンが沈んで止まる位置 (実物挙動)
 
   let stage, renderer, scene, camera, raf, prev, time;
-  let penRoot, plungerG, refillG, camG, springMesh, knockHit;
+  let penRoot, plungerG, refillG, camG, springMesh, knockHit, bodyHit, inkMesh;
   let paperMesh, paperCtx, paperTex;
-  let plunger, refill, camAngle, camTarget;
-  let engaged, clicked, pendingRelease, pressId, pressY0, maxDepth;
-  let drawId, lastUV, scratch, scratchLevel;
+  let plunger, refill, camAngle, camVel;
+  let engaged, clicked, pendingRelease, pressId, pressY0, pressT0, pressMoved;
+  let drawId, lastUV, scratch, scratchLevel, lastMoveT, blotR;
+  let inkLevel, inkUse, swapT, swapDone;
+  let flipId, flipFrom, archives;
   let orbitId, orbit, orbitFrom;
   let penPose; // 'home' | 'draw'
   let drawPoint, resizeHandler;
@@ -209,13 +211,21 @@ window.GAMES.pen = (() => {
     knockHit.position.y = 116;
     penRoot.add(knockHit);
 
+    /* ボディのあたり判定 (インク切れ時のリフィル交換用) */
+    bodyHit = new THREE.Mesh(
+      new THREE.CylinderGeometry(17, 17, 78, 12),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    bodyHit.position.y = 62;
+    penRoot.add(bodyHit);
+
     /* --- リフィル (芯) --- */
     refillG = new THREE.Group();
     penRoot.add(refillG);
     add(refillG, new THREE.CylinderGeometry(1.7, 0.85, 9, 24), mats.brass, 6.5);
     add(refillG, new THREE.SphereGeometry(0.6, 16, 12), mats.steel, 1.8);
     add(refillG, new THREE.CylinderGeometry(1.55, 1.55, 88, 20), mats.tube, 55);
-    add(refillG, new THREE.CylinderGeometry(1.16, 1.16, 58, 16), mats.ink, 40);
+    inkMesh = add(refillG, new THREE.CylinderGeometry(1.16, 1.16, 58, 16), mats.ink, 40);
     add(refillG, new THREE.CylinderGeometry(2.7, 2.7, 2.4, 24), mats.pom, 39.5);
 
     /* 回転カム (ラッチ機構の心臓部) */
@@ -309,19 +319,39 @@ window.GAMES.pen = (() => {
       if (hit.length) {
         pressId = e.pointerId;
         pressY0 = e.clientY;
-        maxDepth = 0;
+        pressT0 = performance.now();
+        pressMoved = 0;
         pendingRelease = false;
-        plunger.t = PRESS_MAX;   /* タップだけでも必ず押し切れる */
+        /* 触れると少し沈む。素早いタップは onUp でフルストロークに、
+           ゆっくり押し込むと深さが指に追従する (半ノックで芯が途中まで出せる) */
+        plunger.t = (engaged ? ENGAGED_REST : 0) + 1.5;
         return;
       }
     }
-    if (drawId === null) {
+    /* インク切れのときにボディをタップ → リフィル交換 */
+    if (inkLevel <= 0 && swapT <= 0 && raycaster.intersectObject(bodyHit, false).length) {
+      swapT = 1;
+      swapDone = false;
+      S.kachi();
+      return;
+    }
+    if (drawId === null && flipId === null) {
       const hit = raycaster.intersectObject(paperMesh, false);
       if (hit.length) {
+        const uv = hit[0].uv;
+        /* 紙の手前右の角からのスワイプでページをめくる (ワールド座標で判定) */
+        const hp = hit[0].point;
+        if (hp.x - 88 > 38 && hp.z - 8 > 52) {
+          flipId = e.pointerId;
+          flipFrom = { x: e.clientX, y: e.clientY };
+          return;
+        }
         drawId = e.pointerId;
         penPose = 'draw';
         drawPoint.copy(hit[0].point);
-        lastUV = hit[0].uv.clone();
+        lastUV = uv.clone();
+        lastMoveT = performance.now();
+        blotR = 0;
         if (engaged) scratchStart();
         return;
       }
@@ -334,11 +364,16 @@ window.GAMES.pen = (() => {
 
   function onMove(e) {
     if (e.pointerId === pressId) {
-      /* 押している間はフルストロークが基準。
-         上へ引いた分だけ戻せる (指の微ブレでは絶対に失敗しない) */
+      /* 押し込みの深さが指の位置にそのまま追従する */
+      pressMoved = Math.max(pressMoved, Math.abs(e.clientY - pressY0));
       const r = renderer.domElement.getBoundingClientRect();
-      const dy = ((e.clientY - pressY0) / r.height) * 95;
-      plunger.t = U.clamp(PRESS_MAX + Math.min(0, dy), 0, PRESS_MAX);
+      const dy = ((e.clientY - pressY0) / r.height) * 130;
+      plunger.t = U.clamp((engaged ? ENGAGED_REST : 0) + 1.5 + dy, 0, PRESS_MAX);
+    } else if (e.pointerId === flipId) {
+      if (Math.hypot(e.clientX - flipFrom.x, e.clientY - flipFrom.y) > 55) {
+        flipId = null;
+        doFlip();
+      }
     } else if (e.pointerId === drawId) {
       raycaster.setFromCamera(pointerNDC(e), camera);
       const hit = raycaster.intersectObject(paperMesh, false);
@@ -349,6 +384,7 @@ window.GAMES.pen = (() => {
           drawStroke(lastUV, uv);
           const d = Math.hypot(uv.x - lastUV.x, uv.y - lastUV.y);
           scratchLevel = Math.min(1, scratchLevel + d * 30);
+          if (d > 0.003) { lastMoveT = performance.now(); blotR = 0; }
         }
         lastUV = uv.clone();
       }
@@ -361,7 +397,11 @@ window.GAMES.pen = (() => {
   function onUp(e) {
     if (e.pointerId === pressId) {
       pressId = null;
+      /* 素早いタップ = フルストローク保証。押し込んだままなら現状維持で戻り判定へ */
+      if (performance.now() - pressT0 < 190 && pressMoved < 14) plunger.t = PRESS_MAX;
       pendingRelease = true;   /* ラッチの確定はプランジャーの戻り行程で行う */
+    } else if (e.pointerId === flipId) {
+      flipId = null;
     } else if (e.pointerId === drawId) {
       drawId = null;
       lastUV = null;
@@ -379,15 +419,70 @@ window.GAMES.pen = (() => {
     const x0 = uv0.x * W, y0 = (1 - uv0.y) * H;
     const x1 = uv1.x * W, y1 = (1 - uv1.y) * H;
     const speed = Math.hypot(x1 - x0, y1 - y0);
-    paperCtx.strokeStyle = 'rgba(23,32,88,0.9)';
     paperCtx.lineCap = 'round';
     paperCtx.lineJoin = 'round';
-    paperCtx.lineWidth = U.clamp(3.6 - speed * 0.04, 2.2, 3.6); /* 速く書くと少し細い */
+    if (inkLevel <= 0) {
+      /* インク切れ: 無色のひっかき跡だけが残る */
+      paperCtx.strokeStyle = 'rgba(126,126,132,0.15)';
+      paperCtx.lineWidth = 1.4;
+    } else {
+      /* 速度で線の太さと濃さが連続的に変わる。残量が少ないとかすれる */
+      const inkK = U.clamp(inkLevel / 0.15, 0.3, 1);
+      const alpha = U.clamp(0.95 - speed * 0.013, 0.28, 0.95) * inkK;
+      paperCtx.strokeStyle = `rgba(23,32,88,${alpha.toFixed(2)})`;
+      paperCtx.lineWidth = U.clamp(4.9 - speed * 0.09, 1.3, 4.9);
+      /* 速筆やインク切れ間際は線が途切れる */
+      if (speed > 34 || inkLevel < 0.1) {
+        paperCtx.setLineDash([7, 3 + Math.max(0, speed - 30) * 0.45 + (inkLevel < 0.1 ? 6 : 0)]);
+      }
+    }
     paperCtx.beginPath();
     paperCtx.moveTo(x0, y0);
     paperCtx.lineTo(x1, y1);
     paperCtx.stroke();
+    paperCtx.setLineDash([]);
+    if (inkLevel > 0) {
+      inkUse += speed;
+      inkLevel = Math.max(0, 1 - inkUse / 22000);
+      updateInkMesh();
+    }
     paperTex.needsUpdate = true;
+  }
+
+  function updateInkMesh() {
+    const k = Math.max(0.02, inkLevel);
+    inkMesh.scale.y = k;
+    inkMesh.position.y = 11 + 29 * k;
+  }
+
+  /* ページをめくる: いまの紙を机の脇へ滑らせ、新しい紙を出す */
+  function doFlip() {
+    S.flipPage();
+    const n = archives.length;
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(150, 200), paperMesh.material);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(88, 2.6, 8);
+    plane.rotation.z = -0.1;
+    scene.add(plane);
+    archives.push({
+      m: plane, t: 0,
+      from: { x: 88, y: 2.6, z: 8, rz: -0.1 },
+      to: { x: -112 - (n % 3) * 7, y: 0.6 + n * 0.35, z: 128 + (n % 4) * 16, rz: -0.55 + n * 0.23 },
+    });
+    if (archives.length > 8) {
+      const old = archives.shift();
+      scene.remove(old.m);
+      old.m.geometry.dispose();
+      if (old.m.material.map) old.m.material.map.dispose();
+      old.m.material.dispose();
+    }
+    /* 新しい紙 */
+    const paper = makePaperCanvas();
+    paperCtx = paper.ctx;
+    paperTex = new THREE.CanvasTexture(paper.cv);
+    paperTex.encoding = THREE.sRGBEncoding;
+    paperTex.anisotropy = 8;
+    paperMesh.material = new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.88 });
   }
 
   function scratchStart() {
@@ -413,10 +508,11 @@ window.GAMES.pen = (() => {
 
     /* ノック: 押し込みは機械的に固く、戻りはバネらしく */
     U.stepSpring(plunger, dt, 1600, 34);
-    /* 最下点付近でカムが1歯回る (押し行程) */
+    /* 最下点付近でカムが1歯回る (押し行程)。回転は慣性つき:
+       リズムよく連打すると勢いが乗ってカムが回り続ける */
     if (plunger.p >= CLICK_DEPTH && !clicked) {
       clicked = true;
-      camTarget += Math.PI / 3;   /* 60度 = 1歯ぶん */
+      camVel += 11;
       S.clickReal(1);
     }
     /* 戻り行程でラッチが確定する (実物と同じ順序) */
@@ -430,7 +526,7 @@ window.GAMES.pen = (() => {
         S.clickReal(0.85, 0.03);      /* 芯が係合して固定される音 */
       } else {
         S.snapBack();                  /* バネが芯をはね戻す */
-        camTarget += Math.PI / 3;      /* 戻りでカムがもう1歯すべる */
+        camVel += 8;                   /* 戻りでカムがもう1歯すべる */
       }
     }
     plungerG.position.y = -plunger.p;
@@ -440,11 +536,60 @@ window.GAMES.pen = (() => {
     const pressExtra = Math.max(0, plunger.p - (engaged ? ENGAGED_REST : 0));
     refill.t = (engaged ? -TIP_OUT : 0) - pressExtra * 0.5;
     U.stepSpring(refill, dt, engaged ? 1400 : 620, engaged ? 30 : 15);
-    refillG.position.y = refill.p;
 
-    /* カムの回転 */
-    camAngle += (camTarget - camAngle) * Math.min(1, dt * 24);
+    /* リフィル交換アニメ (上へ抜けて新品が入る) */
+    let swapOff = 0;
+    if (swapT > 0) {
+      swapT = Math.max(0, swapT - dt);
+      if (swapT > 0.5) {
+        swapOff = (1 - swapT) * 2 * 240;
+      } else {
+        if (!swapDone) {
+          swapDone = true;
+          inkLevel = 1;
+          inkUse = 0;
+          updateInkMesh();
+          S.kachi();
+        }
+        swapOff = swapT * 2 * 240;
+        if (swapT === 0) S.clickReal(0.8);
+      }
+    }
+    refillG.position.y = refill.p + swapOff;
+
+    /* カムの回転 (角速度 + 減衰) */
+    camVel *= Math.exp(-dt * 5);
+    camAngle += camVel * dt;
     camG.rotation.y = camAngle;
+
+    /* 指を止めているとインクだまりがにじむ */
+    if (drawId !== null && engaged && lastUV && inkLevel > 0 &&
+        performance.now() - lastMoveT > 350) {
+      blotR = Math.min(24, blotR + dt * 9);
+      const bx = lastUV.x * 768, by = (1 - lastUV.y) * 1024;
+      paperCtx.fillStyle = 'rgba(23,32,88,0.09)';
+      paperCtx.beginPath();
+      paperCtx.arc(bx, by, blotR, 0, Math.PI * 2);
+      paperCtx.fill();
+      paperTex.needsUpdate = true;
+      inkUse += dt * 260;
+      inkLevel = Math.max(0, 1 - inkUse / 22000);
+      updateInkMesh();
+    }
+
+    /* めくった紙が机の脇へすべっていく */
+    for (const a of archives) {
+      if (a.t < 1) {
+        a.t = Math.min(1, a.t + dt * 2.2);
+        const e2 = 1 - (1 - a.t) * (1 - a.t);
+        a.m.position.set(
+          U.lerp(a.from.x, a.to.x, e2),
+          U.lerp(a.from.y, a.to.y, e2),
+          U.lerp(a.from.z, a.to.z, e2)
+        );
+        a.m.rotation.z = U.lerp(a.from.rz, a.to.rz, e2);
+      }
+    }
 
     updateSpring();
 
@@ -492,11 +637,14 @@ window.GAMES.pen = (() => {
       time = 0;
       THREE.ColorManagement.legacyMode = false;   /* 16進カラーをsRGBとして正しく扱う */
       engaged = false; clicked = false; pendingRelease = false;
-      pressId = null; drawId = null; orbitId = null;
+      pressId = null; drawId = null; orbitId = null; flipId = null;
       plunger = U.spring(0);
       refill = U.spring(0);
-      camAngle = 0; camTarget = 0;
-      maxDepth = 0; scratch = null; scratchLevel = 0;
+      camAngle = 0; camVel = 0;
+      pressMoved = 0; pressT0 = 0; scratch = null; scratchLevel = 0;
+      inkLevel = 1; inkUse = 0; swapT = 0; swapDone = false;
+      lastMoveT = 0; blotR = 0;
+      archives = [];
       springLenShown = -1; springMesh = null;
       penPose = 'home';
       drawPoint = new THREE.Vector3();
