@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="あわあわバブルス">
+<meta name="theme-color" content="#0b2545">
+<title>あわあわバブルス 〜ぷちぷち泡パズル〜</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='42' fill='%233fb6ff' stroke='%23b8e6ff' stroke-width='6'/><ellipse cx='36' cy='34' rx='12' ry='7' fill='white' opacity='0.7' transform='rotate(-30 36 34)'/></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- ============ タイトル ============ -->
+<div id="screen-title" class="screen">
+  <div class="game-logo">
+    <h1>あわあわバブルス</h1>
+    <p>〜 ぷちぷち泡クラスターパズル 〜</p>
+  </div>
+  <div class="title-meta">
+    <span id="title-stars">★ 0 / 120</span>
+    <span id="title-ach">🏆 0 / 35</span>
+  </div>
+  <button class="mode-btn" id="btn-puzzle">
+    <span class="mode-ico">🧩</span>
+    <span class="mode-txt">パズル<span class="mode-sub">40のてづくりレベル</span></span>
+  </button>
+  <button class="mode-btn" id="btn-arcade">
+    <span class="mode-ico">🔥</span>
+    <span class="mode-txt">アーケード<span class="mode-sub">スコアアタック</span></span>
+  </button>
+  <button class="mode-btn" id="btn-zen">
+    <span class="mode-ico">🌊</span>
+    <span class="mode-txt">むげん<span class="mode-sub">のんびり ぶくぶく</span></span>
+  </button>
+  <div class="title-small-btns">
+    <button class="small-btn" id="btn-help">❓ あそびかた</button>
+    <button class="small-btn" id="btn-ach">🏆 じっせき</button>
+    <button class="small-btn" id="btn-settings">⚙️ せってい</button>
+  </div>
+</div>
+
+<!-- ============ レベル選択 ============ -->
+<div id="screen-levels" class="screen hidden">
+  <div class="levels-head">
+    <button class="hud-icon-btn" id="btn-levels-back">←</button>
+    <h2>レベルをえらぶ</h2>
+  </div>
+  <div id="level-worlds"></div>
+</div>
+
+<!-- ============ ゲームHUD ============ -->
+<div id="hud" class="hidden">
+  <div id="hud-top">
+    <button class="hud-icon-btn" id="btn-pause">⏸</button>
+    <span id="hud-mode-label"></span>
+    <div id="goal-chips"></div>
+    <div id="arcade-info" class="hidden">
+      <span id="arcade-score">0</span>
+      <div id="danger-bar"><div id="danger-bar-fill"></div></div>
+    </div>
+  </div>
+  <div id="tip-banner" class="hidden"></div>
+  <div id="hud-bottom">
+    <div id="tanks"></div>
+    <div id="hud-actions">
+      <button class="hud-icon-btn" id="btn-hint">💡</button>
+      <button class="hud-icon-btn" id="btn-sweep">🌊</button>
+      <button class="hud-icon-btn" id="btn-restart">↻</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-root" class="hidden"></div>
+<div id="toast-root"></div>
+
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/creatures.js"></script>
+<script src="js/render.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/achievements.js"></script>
+<script src="js/game.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
