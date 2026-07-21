@@ -1,8 +1,8 @@
 'use strict';
 /* ============================================================
  * game.js — メインエンジン
- *  グリッドシミュレーション / 入力 / 描画 / HUD
- *  縦画面ではボードを 90° 回転して大きく表示する
+ *  グリッドシミュレーション / 入力 / HUD
+ *  描画は render3d.js（Three.js）が担当
  * ============================================================ */
 
 const BASE_SPEED = 1.35;     // タイル/秒
@@ -10,7 +10,7 @@ const DONUT_CAP = 70;
 const SAVE_KEY = 'donutFactoryV1';
 
 const Game = {
-  canvas: null, ctx: null,
+  canvas: null,
   dpr: 1, vw: 0, vh: 0,
   levelIndex: 0, level: null,
   cols: 0, rows: 0,
@@ -18,13 +18,11 @@ const Game = {
   tileList: [],
   donuts: [],
   time: 0,
-  beltPhase: 0,
   speed: 1,
   started: false,
   idleT: 0,
   guide: null,
   pointers: new Map(),
-  view: { s: 1, rotated: false, boardW: 0, boardH: 0 },
   saved: { level: 0, muted: false, counts: {} },
 };
 
@@ -55,7 +53,6 @@ function loadLevel(index) {
   Game.donuts = [];
   Game.guide = null;
   Game.idleT = 0;
-  Particles.clear();
 
   for (let y = 0; y < Game.rows; y++) {
     const row = [];
@@ -87,9 +84,7 @@ function loadLevel(index) {
     Game.tiles.push(row);
   }
 
-  Game.view.boardW = Game.cols * CELL;
-  Game.view.boardH = Game.rows * CELL;
-  computeView();
+  Render3D.buildLevel(Game);
 
   Game.saved.level = index;
   persist();
@@ -128,7 +123,7 @@ Game.isTileClogged = function (tile) {
 Game.spawnFromSpawner = function (tile, manual) {
   if (Game.donuts.length >= DONUT_CAP) {
     const c = tileCenter(tile);
-    Particles.puff(c.x, c.y - 20, 4, '#ffd7e8');
+    Particles.puff(c.x, c.y, 4, '#ffd7e8');
     if (manual) AudioSys.sfx('pop');
     return;
   }
@@ -138,11 +133,11 @@ Game.spawnFromSpawner = function (tile, manual) {
   const c = tileCenter(tile);
   if (manual) {
     AudioSys.sfx('bigPop');
-    Particles.hearts(c.x, c.y - 10, 4);
+    Particles.hearts(c.x, c.y, 4);
     Particles.sparkle(c.x, c.y, 8, '#fff');
   } else {
     AudioSys.sfx('pop');
-    Particles.puff(c.x, c.y + 14, 3, '#ffe9f2');
+    Particles.puff(c.x, c.y, 3, '#ffe9f2');
   }
 };
 
@@ -158,13 +153,13 @@ Game.collectDonut = function (donut, tile) {
   Game.saved.counts[Game.level.id] = (Game.saved.counts[Game.level.id] || 0) + 1;
   persist();
   AudioSys.sfx('chime', tile.count);
-  Particles.stars(c.x, c.y - 20, 6);
+  Particles.stars(c.x, c.y, 6);
   if (tile.count >= 12) {
     tile.count = 0;
     tile.shipT = 1;
     AudioSys.sfx('fanfare');
-    Particles.confetti(c.x, c.y - 30, 40);
-    Particles.stars(c.x, c.y - 30, 14);
+    Particles.confetti(c.x, c.y, 40);
+    Particles.stars(c.x, c.y, 14);
   }
 };
 
@@ -354,8 +349,8 @@ function updateDonuts(dt) {
         const k = Math.min(1, d.stateTime / a.dur);
         d.x = lerp(a.sx, a.ex, k);
         d.y = lerp(a.sy, a.ey, k);
-        d.z = 90 * 4 * k * (1 - k);
-        d.spin = k * TAU * (a.dir === DIR_W || a.dir === DIR_N ? -1 : 1);
+        d.z = 100 * 4 * k * (1 - k);
+        d.spin = k * TAU;
         if (k >= 1) {
           d.spin = 0;
           d.z = 0;
@@ -386,7 +381,7 @@ function updateDonuts(dt) {
         d.spin += dt * 9;
         // ぴょこぴょこ2回はねてきえる
         const bounce = Math.abs(Math.sin(k * Math.PI * 2.5)) * 34 * (1 - k);
-        d.z = bounce;
+        d.z = bounce - 12 * k;
         if (k > 0.75) d.alpha = Math.max(0, 1 - (k - 0.75) / 0.25);
         if (k >= 1) {
           d.dead = true;
@@ -403,7 +398,7 @@ function updateDonuts(dt) {
         d.x = lerp(d.x, d.aux.bx, Math.min(1, dt * 14));
         d.y = lerp(d.y, d.aux.by, Math.min(1, dt * 14));
         d.sx = d.sy = (1 - easeInCubic(k)) * d.targetS;
-        d.z = Math.sin(k * Math.PI) * 40;
+        d.z = Math.sin(k * Math.PI) * 46;
         if (k >= 1) d.dead = true;
         break;
       }
@@ -440,186 +435,12 @@ function updateDonuts(dt) {
       }
 
       case 'carried':
-        d.z += (44 - d.z) * Math.min(1, dt * 12);
+        d.z += (52 - d.z) * Math.min(1, dt * 12);
         break;
     }
   }
 
   Game.donuts = Game.donuts.filter(d => !d.dead);
-}
-
-/* ============================================================
- * ビュー（縦画面なら回転）
- * ============================================================ */
-function computeView() {
-  const v = Game.view;
-  const landscapeBoard = v.boardW >= v.boardH;
-  const landscapeScreen = Game.vw >= Game.vh;
-  v.rotated = landscapeBoard !== landscapeScreen;
-  const effW = v.rotated ? v.boardH : v.boardW;
-  const effH = v.rotated ? v.boardW : v.boardH;
-  const padX = 14, padY = 14;
-  v.s = Math.min((Game.vw - padX * 2) / effW, (Game.vh - padY * 2) / effH);
-}
-
-function screenToWorld(sx, sy) {
-  const v = Game.view;
-  let x = sx - Game.vw / 2;
-  let y = sy - Game.vh / 2;
-  if (v.rotated) { const t = x; x = y; y = -t; }
-  return { x: x / v.s + v.boardW / 2, y: y / v.s + v.boardH / 2 };
-}
-
-function worldToScreen(wx, wy) {
-  const v = Game.view;
-  let x = (wx - v.boardW / 2) * v.s;
-  let y = (wy - v.boardH / 2) * v.s;
-  if (v.rotated) { const t = x; x = -y; y = t; }
-  return { x: x + Game.vw / 2, y: y + Game.vh / 2 };
-}
-
-function applyViewTransform(ctx) {
-  const v = Game.view;
-  ctx.setTransform(Game.dpr, 0, 0, Game.dpr, 0, 0);
-  ctx.translate(Game.vw / 2, Game.vh / 2);
-  if (v.rotated) ctx.rotate(Math.PI / 2);
-  ctx.scale(v.s, v.s);
-  ctx.translate(-v.boardW / 2, -v.boardH / 2);
-}
-
-/* ============================================================
- * 描画
- * ============================================================ */
-function render() {
-  const ctx = Game.ctx;
-  const theme = Game.level.theme;
-
-  ctx.setTransform(Game.dpr, 0, 0, Game.dpr, 0, 0);
-  ctx.fillStyle = theme.bg;
-  ctx.fillRect(0, 0, Game.vw, Game.vh);
-
-  applyViewTransform(ctx);
-
-  // ボードパネル
-  ctx.save();
-  ctx.shadowColor = 'rgba(140, 80, 110, 0.25)';
-  ctx.shadowBlur = 30;
-  ctx.fillStyle = theme.floorA;
-  roundRectPath(ctx, -14, -14, Game.view.boardW + 28, Game.view.boardH + 28, 26);
-  ctx.fill();
-  ctx.restore();
-
-  // チェッカーゆか + かざり
-  for (let y = 0; y < Game.rows; y++) {
-    for (let x = 0; x < Game.cols; x++) {
-      if ((x + y) % 2 === 1) {
-        ctx.fillStyle = theme.floorB;
-        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-      }
-      if (!Game.tiles[y][x]) {
-        const rng = mulberry32(x * 73 + y * 131 + Game.levelIndex * 17);
-        if (rng() < 0.16) {
-          drawFloorDeco(ctx, x, y, rng);
-        }
-      }
-    }
-  }
-
-  // タイル base
-  for (const t of Game.tileList) {
-    const def = TILE_DEFS[t.type];
-    if (def.drawBase) def.drawBase(ctx, t, Game, Game.time);
-  }
-
-  // ドーナツ（y順、もちあげ中は最後）
-  const sorted = Game.donuts.slice().sort((a, b) => {
-    const ka = (a.state === 'carried' ? 10000 : 0) + a.y;
-    const kb = (b.state === 'carried' ? 10000 : 0) + b.y;
-    return ka - kb;
-  });
-  for (const d of sorted) d.draw(ctx, Game.time);
-
-  // タイル top（アーチなど）
-  for (const t of Game.tileList) {
-    const def = TILE_DEFS[t.type];
-    if (def.drawTop) def.drawTop(ctx, t, Game, Game.time);
-  }
-
-  Particles.draw(ctx);
-
-  // おてほんガイド（スクリーン座標で正立描画）
-  if (Game.guide) drawGuide(ctx);
-}
-
-function drawFloorDeco(ctx, x, y, rng) {
-  const cx = (x + 0.5) * CELL, cy = (y + 0.5) * CELL;
-  const kind = Math.floor(rng() * 3);
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(rng() * TAU);
-  ctx.globalAlpha = 0.5;
-  if (kind === 0) {
-    // おはな
-    ctx.fillStyle = '#ffffff';
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * TAU;
-      ctx.beginPath();
-      ctx.arc(Math.cos(a) * 9, Math.sin(a) * 9, 6, 0, TAU);
-      ctx.fill();
-    }
-    ctx.fillStyle = '#ffd94d';
-    ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fill();
-  } else if (kind === 1) {
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    for (let j = 0; j < 10; j++) {
-      const a = -Math.PI / 2 + j * Math.PI / 5;
-      const r = (j % 2 === 0 ? 10 : 4.5);
-      if (j === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-    }
-    ctx.closePath();
-    ctx.fill();
-  } else {
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(-6, 0, 4, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(6, 4, 3, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(4, -7, 2.5, 0, TAU); ctx.fill();
-  }
-  ctx.restore();
-  ctx.globalAlpha = 1;
-}
-
-function drawGuide(ctx) {
-  const g = Game.guide;
-  const c = tileCenter(g.tile);
-  const p = worldToScreen(c.x, c.y);
-  const t = Game.time - g.t0;
-  const pulse = 0.5 + 0.5 * Math.sin(t * 5);
-  const r = Game.view.s * CELL * (0.52 + pulse * 0.1);
-
-  ctx.setTransform(Game.dpr, 0, 0, Game.dpr, 0, 0);
-  ctx.strokeStyle = `rgba(255, 214, 66, ${0.55 + pulse * 0.4})`;
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, r, 0, TAU);
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, r + 5, 0, TAU);
-  ctx.stroke();
-
-  // ゆびが「とんとん」する
-  const tap = Math.max(0, Math.sin(t * 5));
-  ctx.font = `${Math.round(Game.view.s * CELL * 0.62)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.save();
-  ctx.translate(p.x + r * 0.5, p.y + r * 0.8 - tap * 12);
-  ctx.rotate(-0.3);
-  ctx.fillText('👆', 0, 0);
-  ctx.restore();
 }
 
 /* ============================================================
@@ -649,7 +470,7 @@ function hitDonut(wx, wy) {
   for (let i = Game.donuts.length - 1; i >= 0; i--) {
     const d = Game.donuts[i];
     if (d.state !== 'belt' && d.state !== 'carried') continue;
-    if (dist2(wx, wy, d.x, d.y - d.z) < (DONUT_R * 1.35) ** 2) return d;
+    if (dist2(wx, wy, d.x, d.y) < (DONUT_R * 1.35) ** 2) return d;
   }
   return null;
 }
@@ -662,7 +483,7 @@ function onPointerDown(e) {
   if (!Game.started) return;
 
   const rect = Game.canvas.getBoundingClientRect();
-  const w = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+  const w = Render3D.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
 
   // 1) ドーナツをつかむ
   const d = hitDonut(w.x, w.y);
@@ -673,7 +494,7 @@ function onPointerDown(e) {
     d.spin = 0;
     Game.pointers.set(e.pointerId, { kind: 'grab', donut: d });
     AudioSys.sfx('boing');
-    Particles.hearts(d.x, d.y - 30, 3);
+    Particles.hearts(d.x, d.y, 3);
     try { Game.canvas.setPointerCapture(e.pointerId); } catch (err) {}
     return;
   }
@@ -701,10 +522,10 @@ function onPointerMove(e) {
   if (!p || p.kind !== 'grab') return;
   e.preventDefault();
   const rect = Game.canvas.getBoundingClientRect();
-  const w = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+  const w = Render3D.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
   const d = p.donut;
-  d.x = clamp(w.x, -CELL * 0.4, Game.view.boardW + CELL * 0.4);
-  d.y = clamp(w.y, -CELL * 0.4, Game.view.boardH + CELL * 0.4);
+  d.x = clamp(w.x, -CELL * 0.4, Game.cols * CELL + CELL * 0.4);
+  d.y = clamp(w.y, -CELL * 0.4, Game.rows * CELL + CELL * 0.4);
 }
 
 function onPointerUp(e) {
@@ -726,7 +547,7 @@ function onPointerUp(e) {
     d.exitDir = d.entryDir;
     d.centerFired = false;   // おいた場所の装置が発動（ボックスなら回収）
     AudioSys.sfx('plop');
-    Particles.puff(d.x, d.y + 10, 3, '#fff');
+    Particles.puff(d.x, d.y, 3, '#fff');
   } else {
     startFall(d, randInt(0, 3));
   }
@@ -772,10 +593,10 @@ function setupHUD() {
     for (const d of Game.donuts) {
       if (d.state === 'collect' || d.state === 'fall') continue;
       d.randomize();
-      Particles.sparkle(d.x, d.y - 20, 4, '#fff');
+      Particles.sparkle(d.x, d.y, 4, '#fff');
     }
     for (let i = 0; i < 5; i++) {
-      Particles.confetti(rand(0, Game.view.boardW), rand(0, Game.view.boardH), 10);
+      Particles.confetti(rand(0, Game.cols * CELL), rand(0, Game.rows * CELL), 10);
     }
     Game.noteTinker();
   });
@@ -817,7 +638,6 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - _lastT) / 1000 || 0.016);
   _lastT = ts;
   Game.time += dt;
-  Game.beltPhase += dt * BASE_SPEED * Game.speed;
   Game.rainbowCooldown = Math.max(0, (Game.rainbowCooldown || 0) - dt);
 
   if (Game.started) {
@@ -830,25 +650,20 @@ function frame(ts) {
     Particles.update(dt);
     updateGuide(dt);
   }
-  render();
+  Render3D.render(Game, dt);
   requestAnimationFrame(frame);
 }
 
 function resize() {
-  const c = Game.canvas;
   Game.dpr = Math.min(2, window.devicePixelRatio || 1);
   Game.vw = window.innerWidth;
   Game.vh = window.innerHeight;
-  c.width = Math.round(Game.vw * Game.dpr);
-  c.height = Math.round(Game.vh * Game.dpr);
-  c.style.width = Game.vw + 'px';
-  c.style.height = Game.vh + 'px';
-  computeView();
+  Render3D.resize(Game.vw, Game.vh, Game.dpr, Game);
 }
 
 function boot() {
   Game.canvas = document.getElementById('game');
-  Game.ctx = Game.canvas.getContext('2d');
+  Render3D.init(Game.canvas);
   loadSave();
 
   resize();
