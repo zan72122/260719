@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ひかりのたび">
+<meta name="theme-color" content="#1c1240">
+<title>ひかりのたび 〜ゆめのフロック〜</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%A8%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- タイトル画面オーバーレイ -->
+<div id="title">
+  <div class="title-inner">
+    <h1><span>ひ</span><span>か</span><span>り</span><span>の</span><span>た</span><span>び</span></h1>
+    <p class="subtitle">〜 ゆめの フロック 〜</p>
+    <p class="howto">ゆびで みちを かいて<br>ひかりのこどもたちを<br>おなじいろの ほしへ とどけよう</p>
+    <div id="startBtn">▶ タップして はじめる</div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="starBar"></div>
+  <div class="hud-right">
+    <button id="muteBtn" aria-label="おとのオンオフ">🔊</button>
+    <button id="resetBtn" aria-label="さいしょから">↺</button>
+  </div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/boids.js"></script>
+<script src="js/planets.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
