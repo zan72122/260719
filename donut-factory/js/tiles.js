@@ -100,7 +100,8 @@ const TILE_DEFS = {
       tile.pop = 1;
       AudioSys.sfx('splat');
       const c = tileCenter(tile);
-      Particles.splash(c.x, c.y, FROST_COLORS[tile.color].fill, 8);
+      Particles.splash(c.x, c.y, FROST_COLORS[tile.color].fill, 14);
+      Render3D.shake(3);
     },
     onTap(tile, game) {
       const i = FROST_CYCLE.indexOf(tile.color);
@@ -214,8 +215,11 @@ const TILE_DEFS = {
       tile.pop = 1;
       AudioSys.sfx('stamp');
       const c = tileCenter(tile);
-      Particles.stars(c.x, c.y, 6);
-      Particles.crumbs(c.x, c.y, 4);
+      Particles.stars(c.x, c.y, 8);
+      Particles.crumbs(c.x, c.y, 6);
+      Particles.puff(c.x, c.y, 6, '#e6dcfa');
+      Render3D.shake(14);                       // ズドン！
+      Render3D.flash(c.x, c.y, '#ffffff', 150);
     },
     onTap(tile, game) {
       const i = SHAPE_CYCLE.indexOf(tile.shape);
@@ -223,6 +227,9 @@ const TILE_DEFS = {
       tile.pressT = 1;
       tile.pop = 1;
       AudioSys.sfx('stamp');
+      const c = tileCenter(tile);
+      Particles.puff(c.x, c.y, 5, '#e6dcfa');
+      Render3D.shake(8);
       game.noteTinker();
     },
     update(tile, dt) { tile.pressT = Math.max(0, tile.pressT - dt * 3); },
@@ -384,6 +391,7 @@ const TILE_DEFS = {
       tile.pop = 1;
       AudioSys.sfx('clunk');
       if (tile.open) AudioSys.sfx('slide');
+      else Render3D.shake(5);                   // ガシャン！ととじる
       game.noteTinker();
     },
     update(tile, dt) {

@@ -160,6 +160,9 @@ Game.collectDonut = function (donut, tile) {
     AudioSys.sfx('fanfare');
     Particles.confetti(c.x, c.y, 40);
     Particles.stars(c.x, c.y, 14);
+    Render3D.punch(0.7);                 // 出荷！カメラがズームバウンス
+    Render3D.shake(8);
+    Render3D.flash(c.x, c.y, '#fff3b0', 210);
   }
 };
 
@@ -175,6 +178,8 @@ Game.cloneDonut = function (donut, tile) {
   Game.donuts.push(d);
   AudioSys.sfx('bigPop');
   Particles.sparkle(c.x, c.y, 10, '#aef2ae');
+  Render3D.flash(c.x, c.y, '#b6ffb6', 170);    // コピーの閃光！
+  Render3D.punch(0.3);
 };
 
 Game.teleportDonut = function (donut, tile) {
@@ -184,8 +189,12 @@ Game.teleportDonut = function (donut, tile) {
   donut.stateTime = 0;
   donut.aux = { partner };
   const c = tileCenter(tile);
+  const col = TELE_COLORS[tile.pair % TELE_COLORS.length];
   AudioSys.sfx('whoosh');
-  Particles.sparkle(c.x, c.y, 10, TELE_COLORS[tile.pair % TELE_COLORS.length]);
+  Particles.sparkle(c.x, c.y, 10, col);
+  Render3D.flash(c.x, c.y, col, 130);
+  const pc = tileCenter(partner);
+  Render3D.flash(pc.x, pc.y, col, 130);
 };
 
 Game.startJump = function (donut, tile) {
@@ -203,6 +212,7 @@ Game.startJump = function (donut, tile) {
     dur: 0.55,
   };
   AudioSys.sfx('boing');
+  Render3D.shake(5);
 };
 
 function startFall(donut, dir) {
@@ -598,6 +608,8 @@ function setupHUD() {
     for (let i = 0; i < 5; i++) {
       Particles.confetti(rand(0, Game.cols * CELL), rand(0, Game.rows * CELL), 10);
     }
+    Render3D.punch(0.5);
+    Render3D.shake(6);
     Game.noteTinker();
   });
 
