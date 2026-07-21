@@ -1,0 +1,260 @@
+'use strict';
+/* ============================================================
+ * levels.js — 10このドーナツこうじょう
+ *
+ * map の文字:
+ *   > < ^ v : ベルト（矢印の向き）
+ *   .       : ゆか
+ *   その他   : legend で定義した装置
+ * ============================================================ */
+
+const LEVELS = [
+  {
+    id: 'first',
+    name: 'はじめて こうじょう',
+    emoji: '🍩',
+    spawnEvery: 2.4,
+    theme: { floorA: '#ffe9f2', floorB: '#ffdeed', bg: '#ffd9ec' },
+    music: { seed: 11, key: 0, tempo: 80 },
+    map: [
+      '.........',
+      '.........',
+      's>>F>>K>b',
+      '.........',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      F: { type: 'froster', dir: 'E', color: 'pink' },
+      K: { type: 'sprinkler', dir: 'E', style: 'rainbow' },
+    },
+  },
+
+  {
+    id: 'twins',
+    name: 'ふたごの みち',
+    emoji: '🍫',
+    spawnEvery: 2.2,
+    theme: { floorA: '#f2ede6', floorB: '#eae2d6', bg: '#e3d7c4' },
+    music: { seed: 22, key: 5, tempo: 84 },
+    map: [
+      '...>>F>v.',
+      '...^...v.',
+      's>>X...>b',
+      '...v...^.',
+      '...>>G>^.',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      X: { type: 'splitter', dir: 'E', outs: ['N', 'S'] },
+      F: { type: 'froster', dir: 'E', color: 'pink' },
+      G: { type: 'froster', dir: 'E', color: 'choco' },
+    },
+  },
+
+  {
+    id: 'river',
+    name: 'ながい ながれ',
+    emoji: '🌊',
+    spawnEvery: 2.0,
+    theme: { floorA: '#e8f6ff', floorB: '#dbefff', bg: '#cfe8ff' },
+    music: { seed: 33, key: 7, tempo: 76 },
+    map: [
+      's>>>>>>v.',
+      '.......v.',
+      '.v<K<F<<.',
+      '.v.......',
+      '.>>Z>C>>b',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      F: { type: 'froster', dir: 'W', color: 'blue' },
+      K: { type: 'sprinkler', dir: 'W', style: 'rainbow' },
+      Z: { type: 'glazer', dir: 'E' },
+      C: { type: 'creamer', dir: 'E' },
+    },
+  },
+
+  {
+    id: 'clones',
+    name: 'ふえる ドーナツ',
+    emoji: '👯',
+    spawnEvery: 3.4,
+    theme: { floorA: '#eafaef', floorB: '#dcf4e4', bg: '#cfeedd' },
+    music: { seed: 44, key: 2, tempo: 92 },
+    map: [
+      '.........',
+      's>Y>Y>Y>v',
+      '..v.v.v.v',
+      '..>>>>>>v',
+      '........v',
+      '........b',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      Y: { type: 'cloner', dir: 'E', side: 'S' },
+    },
+  },
+
+  {
+    id: 'teleport',
+    name: 'テレポート けんきゅうじょ',
+    emoji: '🌀',
+    spawnEvery: 2.4,
+    theme: { floorA: '#f3ecff', floorB: '#eae0ff', bg: '#ded0f8' },
+    music: { seed: 55, key: 9, tempo: 78 },
+    map: [
+      's>Fp.....',
+      '.........',
+      '...q>K>v.',
+      '.......v.',
+      '.b<u...r.',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      F: { type: 'froster', dir: 'E', color: 'purple' },
+      K: { type: 'sprinkler', dir: 'E', style: 'star' },
+      p: { type: 'tele', pair: 0, dir: 'S' },
+      q: { type: 'tele', pair: 0, dir: 'E' },
+      r: { type: 'tele', pair: 1, dir: 'W' },
+      u: { type: 'tele', pair: 1, dir: 'W' },
+    },
+  },
+
+  {
+    id: 'jumpy',
+    name: 'ぴょんぴょん ランド',
+    emoji: '🐰',
+    spawnEvery: 2.2,
+    theme: { floorA: '#fff3e6', floorB: '#ffead6', bg: '#ffe0c2' },
+    music: { seed: 66, key: 4, tempo: 96 },
+    map: [
+      '.........',
+      's>J.>J.>v',
+      '........v',
+      'b<<F<<<<<',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      J: { type: 'jump', dir: 'E' },
+      F: { type: 'froster', dir: 'W', color: 'choco' },
+    },
+  },
+
+  {
+    id: 'randomia',
+    name: 'びっくり ランダム',
+    emoji: '🎲',
+    spawnEvery: 2.4,
+    theme: { floorA: '#fdeaff', floorB: '#f7ddfb', bg: '#f0cef5' },
+    music: { seed: 77, key: -3, tempo: 88 },
+    map: [
+      's>>R>>>v.',
+      '...v...v.',
+      '.>>?<<<<.',
+      '...v.....',
+      '.b<<.....',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      R: { type: 'random', dir: 'E' },
+      '?': { type: 'wild' },
+    },
+  },
+
+  {
+    id: 'circuit',
+    name: 'しんごう サーキット',
+    emoji: '🚦',
+    spawnEvery: 2.0,
+    theme: { floorA: '#fffbe5', floorB: '#fff5d0', bg: '#f7ecc0' },
+    music: { seed: 88, key: 5, tempo: 90 },
+    map: [
+      '....>>>b.',
+      's>>>W>Gv.',
+      '.^.....v.',
+      '.^.....v.',
+      '.^<<M<<<.',
+      '....>>>c.',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      c: { type: 'box' },
+      W: { type: 'switcher', outs: ['E', 'N'], idx: 0 },
+      M: { type: 'switcher', outs: ['W', 'S'], idx: 1 },
+      G: { type: 'gate', dir: 'E' },
+    },
+  },
+
+  {
+    id: 'shapes',
+    name: 'かたち ファクトリー',
+    emoji: '⭐',
+    spawnEvery: 2.2,
+    theme: { floorA: '#fffde8', floorB: '#fdf7d0', bg: '#f8f0bb' },
+    music: { seed: 99, key: 0, tempo: 82 },
+    map: [
+      '.........',
+      's>P>Z>C>v',
+      '........v',
+      'b<T<K<<<<',
+      '.........',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      P: { type: 'stamper', dir: 'E', shape: 'star' },
+      Z: { type: 'glazer', dir: 'E' },
+      C: { type: 'creamer', dir: 'E' },
+      K: { type: 'sprinkler', dir: 'W', style: 'heart' },
+      T: { type: 'topper', dir: 'W', kind: 'cherry' },
+    },
+  },
+
+  {
+    id: 'special',
+    name: 'ぜんぶのせ スペシャル',
+    emoji: '🎉',
+    spawnEvery: 2.6,
+    theme: { floorA: '#fff0f4', floorB: '#eaf4ff', bg: '#ffd9ec' },
+    music: { seed: 123, key: 7, tempo: 86 },
+    map: [
+      '..........',
+      's>X>F>>Y>v',
+      '..v....v.v',
+      '..v.p<R<<<',
+      '..v.......',
+      '..>>K>Zg>d',
+      '.q>H>C>T>e',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      d: { type: 'box' },
+      e: { type: 'box' },
+      X: { type: 'splitter', dir: 'E', outs: ['E', 'S'] },
+      Y: { type: 'cloner', dir: 'E', side: 'S' },
+      F: { type: 'froster', dir: 'E', color: 'pink' },
+      H: { type: 'froster', dir: 'E', color: 'choco' },
+      R: { type: 'random', dir: 'W' },
+      K: { type: 'sprinkler', dir: 'E', style: 'rainbow' },
+      Z: { type: 'glazer', dir: 'E' },
+      C: { type: 'creamer', dir: 'E' },
+      T: { type: 'topper', dir: 'E', kind: 'strawberry' },
+      g: { type: 'gate', dir: 'E' },
+      p: { type: 'tele', pair: 0, dir: 'W' },
+      q: { type: 'tele', pair: 0, dir: 'E' },
+    },
+  },
+];

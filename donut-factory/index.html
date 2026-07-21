@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffd9ec">
+<title>ドーナツこうじょう 🍩</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <button id="btn-levels" class="hud-btn" aria-label="こうじょうをえらぶ">🏭</button>
+  <button id="btn-sound"  class="hud-btn" aria-label="おと">🔊</button>
+  <button id="btn-rainbow" class="hud-btn" aria-label="にじパワー">🌈</button>
+  <button id="btn-turbo"  class="hud-btn" aria-label="スピード">🐢</button>
+</div>
+
+<div id="level-overlay" class="overlay hidden">
+  <div class="overlay-panel">
+    <div class="overlay-title">どの こうじょうで あそぶ？</div>
+    <div id="level-grid"></div>
+  </div>
+</div>
+
+<div id="start-overlay" class="overlay">
+  <div class="start-inner">
+    <div class="start-donut">🍩</div>
+    <div class="start-title">ドーナツこうじょう</div>
+    <div class="start-tap">タップして スタート！</div>
+  </div>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/particles.js"></script>
+<script src="js/donut.js"></script>
+<script src="js/tiles.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
