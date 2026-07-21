@@ -1,0 +1,294 @@
+/* =========================================================
+ * style.css — 4歳の指のための大きなボタンと楽しい見た目
+ * iPhone / iPad 縦横対応 (safe-area 考慮)
+ * ========================================================= */
+
+:root {
+  --font: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "Comic Sans MS", system-ui, sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  touch-action: none;
+  font-family: var(--font);
+  background: #8ed8f8;
+}
+
+#game {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- タイトル画面 ---------- */
+
+#title {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4vmin;
+  pointer-events: none; /* 背景の物理文字も触れるように */
+  z-index: 10;
+}
+
+#title-letters {
+  font-size: clamp(64px, 18vmin, 150px);
+  font-weight: 900;
+  display: flex;
+  gap: 0.06em;
+  text-shadow: 0 0.06em 0 rgba(255, 255, 255, 0.9), 0 0.12em 0.2em rgba(0, 60, 120, 0.25);
+}
+
+#title-letters span {
+  display: inline-block;
+  animation: bounce 1.6s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-0.18em) rotate(3deg); }
+}
+
+#title-sub {
+  font-size: clamp(16px, 4vmin, 28px);
+  color: #245a8d;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 0.4em 1.2em;
+  border-radius: 2em;
+}
+
+#title-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3vmin;
+  pointer-events: auto;
+}
+
+.mode-btn {
+  font-family: var(--font);
+  border: none;
+  border-radius: 28px;
+  width: clamp(110px, 24vmin, 170px);
+  height: clamp(110px, 24vmin, 170px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #fff;
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.18), 0 12px 24px rgba(0, 40, 90, 0.25);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.mode-btn:active { transform: translateY(6px) scale(0.97); box-shadow: 0 2px 0 rgba(0,0,0,0.18); }
+
+.mode-btn .icon { font-size: clamp(44px, 10vmin, 72px); line-height: 1; }
+.mode-btn .label-en { font-size: clamp(18px, 4vmin, 26px); font-weight: 900; letter-spacing: 0.05em; }
+.mode-btn .label-ja { font-size: clamp(11px, 2.4vmin, 15px); opacity: 0.9; }
+
+#play-playground { background: linear-gradient(#ff8a5c, #f4623a); }
+#play-words      { background: linear-gradient(#5cc9ff, #2f8fdd); }
+#play-catch      { background: linear-gradient(#ffd45c, #f0a72f); }
+
+/* ---------- ホームボタン ---------- */
+
+#btn-home {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  left: calc(10px + env(safe-area-inset-left));
+  z-index: 20;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 28px;
+  box-shadow: 0 4px 10px rgba(0, 40, 90, 0.3);
+  cursor: pointer;
+}
+#btn-home:active { transform: scale(0.92); }
+
+/* ---------- HUD 共通 ---------- */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+}
+#hud > * { pointer-events: auto; }
+
+/* ---------- もじあそび: 文字トレイ ---------- */
+
+#tray {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px calc(8px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(6px);
+  border-top: 3px solid rgba(120, 180, 230, 0.5);
+}
+
+#tray-letters {
+  flex: 1;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto); /* 2段組みで一度にたくさん見える */
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px;
+  touch-action: pan-x; /* トレイは横スクロールだけ許可 */
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+#tray-letters::-webkit-scrollbar { display: none; }
+
+.letter-btn {
+  font-family: var(--font);
+  flex: 0 0 auto;
+  width: clamp(58px, 9vmin, 78px);
+  height: clamp(58px, 9vmin, 78px);
+  border: none;
+  border-radius: 18px;
+  font-size: clamp(30px, 5vmin, 42px);
+  font-weight: 900;
+  color: #fff;
+  background: var(--c, #888);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+.letter-btn.pressed { animation: pressPop 0.25s ease; }
+@keyframes pressPop {
+  40% { transform: scale(0.85); }
+  70% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+#tray-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-btn {
+  font-family: var(--font);
+  width: clamp(44px, 7vmin, 56px);
+  height: clamp(34px, 5.4vmin, 44px);
+  border: none;
+  border-radius: 12px;
+  font-size: clamp(17px, 3vmin, 24px);
+  font-weight: 900;
+  color: #245a8d;
+  background: #e3f1fd;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+}
+.tool-btn:active { transform: scale(0.92); }
+
+/* ---------- ことばパズル ---------- */
+
+#word-banner {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 24px;
+  padding: 8px 24px;
+  box-shadow: 0 4px 12px rgba(0, 40, 90, 0.25);
+  pointer-events: none;
+}
+
+#word-emoji { font-size: clamp(40px, 8vmin, 64px); }
+
+#word-text {
+  font-size: clamp(28px, 6vmin, 48px);
+  font-weight: 900;
+  color: #f4623a;
+  letter-spacing: 0.1em;
+  min-width: 1em;
+}
+
+.big-next {
+  position: absolute;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  width: clamp(84px, 15vmin, 120px);
+  height: clamp(84px, 15vmin, 120px);
+  border: none;
+  border-radius: 50%;
+  font-size: clamp(38px, 7vmin, 56px);
+  color: #fff;
+  background: linear-gradient(#7ed957, #4cae2f);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.2), 0 10px 20px rgba(0, 60, 0, 0.3);
+  cursor: pointer;
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* ---------- もじキャッチ ---------- */
+
+#catch-banner {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  padding: 6px 22px;
+  box-shadow: 0 4px 12px rgba(0, 40, 90, 0.25);
+  pointer-events: none;
+}
+
+#catch-find {
+  font-size: clamp(16px, 3.4vmin, 24px);
+  font-weight: 900;
+  color: #245a8d;
+  letter-spacing: 0.12em;
+}
+
+#catch-target {
+  font-size: clamp(44px, 9vmin, 72px);
+  font-weight: 900;
+  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.8);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+#catch-stars { display: flex; gap: 2px; }
+#catch-stars .star { font-size: clamp(18px, 3.6vmin, 28px); opacity: 0.25; }
+#catch-stars .star.on { opacity: 1; animation: pressPop 0.4s ease; }

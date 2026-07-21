@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>ABC Land — もじの物理あそび</title>
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- タイトル画面 -->
+  <div id="title">
+    <div id="title-letters"></div>
+    <div id="title-sub">もじをさわって あそぼう!</div>
+    <div id="title-buttons">
+      <button class="mode-btn" id="play-playground">
+        <span class="icon">🎪</span>
+        <span class="label-en">PLAY</span>
+        <span class="label-ja">もじあそび</span>
+      </button>
+      <button class="mode-btn" id="play-words">
+        <span class="icon">🧩</span>
+        <span class="label-en">WORDS</span>
+        <span class="label-ja">ことばパズル</span>
+      </button>
+      <button class="mode-btn" id="play-catch">
+        <span class="icon">⭐</span>
+        <span class="label-en">FIND</span>
+        <span class="label-ja">もじキャッチ</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 遊び中の UI (各モードが中身を作る) -->
+  <div id="hud"></div>
+
+  <button id="btn-home" class="hidden">🏠</button>
+
+  <script src="vendor/matter.min.js"></script>
+  <script src="js/letters.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/modes.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
