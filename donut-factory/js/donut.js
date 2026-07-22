@@ -109,6 +109,21 @@ class Donut {
     this.sprinklePts = null;
     this.isVeggie = false;   // やさいスイッチで変身中
     this.hidden = false;     // 大砲のなかなど
+    // ふれあい物理（おしくらまんじゅう）
+    this.ox = 0; this.oy = 0;        // 押し合いオフセット
+    this.overlap = 0;                // 今フレームの接触深さ
+    this.overlapS = 0;               // なめらか化した接触深さ（描画用）
+    this.pressure = 0;               // 同時に押してくる数
+    this.pressN = null;              // いちばん強く押し合っている相手
+    this.reverseLock = 0;            // 反転ヒステリシス
+    this.revHold = false;            // 境界でふんばり中
+    this.rider = null;               // 上に乗っている子
+    this.carrier = null;             // 乗せてもらっている相手
+    this.squeezeCd = 0;              // にゅるっと逃げのクールダウン
+    this.prevX = this.x; this.prevY = this.y;
+    this.anchorX = this.x; this.anchorY = this.y;
+    this.anchorT = 0.25;             // jam 判定の窓タイマー
+    this.jammed = false;
     this.aux = {};
   }
 

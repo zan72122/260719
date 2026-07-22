@@ -8,6 +8,9 @@
 const LANE_W = 64;
 const TELE_COLORS = ['#b78cff', '#5cc8ff', '#7ce27c', '#ffb84d'];
 
+// 2階建てなら「上の子」がデコられる
+const topOf = d => d.rider || d;
+
 function makeTile(spec, x, y) {
   return Object.assign({
     x, y,
@@ -108,7 +111,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setFrost(tile.color);
+      topOf(donut).setFrost(tile.color);
       tile.pop = 1;
       AudioSys.sfx('splat');
       const c = tileCenter(tile);
@@ -132,7 +135,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setSprinkles(tile.style);
+      topOf(donut).setSprinkles(tile.style);
       tile.pop = 1;
       AudioSys.sfx('shaker');
     },
@@ -161,7 +164,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setCream(true);
+      topOf(donut).setCream(true);
       tile.pop = 1;
       AudioSys.sfx('pop');
       const c = tileCenter(tile);
@@ -182,7 +185,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setTopper(tile.kind);
+      topOf(donut).setTopper(tile.kind);
       tile.pop = 1;
       AudioSys.sfx('pop');
     },
@@ -201,7 +204,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setGlaze(true);
+      topOf(donut).setGlaze(true);
       tile.pop = 1;
       AudioSys.sfx('splat');
       const c = tileCenter(tile);
@@ -222,7 +225,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.setShape(tile.shape);
+      topOf(donut).setShape(tile.shape);
       tile.pressT = 1;
       tile.pop = 1;
       AudioSys.sfx('stamp');
@@ -310,7 +313,7 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onCenter(tile, donut, game) {
-      donut.randomize();
+      topOf(donut).randomize();
       tile.pop = 1;
       tile.spinAnim = 1;
       AudioSys.sfx('spin');

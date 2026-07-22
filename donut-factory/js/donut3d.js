@@ -320,12 +320,19 @@ const Donut3D = (() => {
       v.group.visible = !d.hidden;
       v.group.position.set(d.x, DONUT_BASE_Y + d.z, d.y);
 
-      // スケール（squish + じたばた + かみなりのビリビリ）
+      // スケール（squish + じたばた + かみなりのビリビリ + おしくらまんじゅう）
       let sq = Math.sin(time * 5 + d.wobble) * 0.02;
-      if (d.stopped) sq += Math.sin(time * 16 + d.wobble) * 0.045;
+      if (d.stopped || d.jammed) sq += Math.sin(time * 16 + d.wobble) * 0.045;
       if (game.stunT > 0) sq += Math.sin(time * 40 + d.wobble) * 0.06;
       const a = d.alpha;
-      v.body.scale.set(d.sx * (1 + sq) * a, Math.max(0.02, d.sy * (1 - sq)) * a, d.sx * (1 + sq) * a);
+      // 押されると横にちぢんで、たてにむにゅっとふくらむ
+      const ov = d.overlapS || 0;
+      const ovXZ = 1 - ov * 0.16;
+      const ovY = 1 + ov * 0.36;
+      v.body.scale.set(
+        d.sx * (1 + sq) * ovXZ * a,
+        Math.max(0.02, d.sy * (1 - sq) * ovY) * a,
+        d.sx * (1 + sq) * ovXZ * a);
 
       // 回転（状態ごと）
       v.body.rotation.set(0, Math.sin(time * 2.2 + d.wobble) * 0.06, 0);
@@ -337,6 +344,10 @@ const Donut3D = (() => {
         v.body.rotation.y = d.spin;
       } else if (d.state === 'carried') {
         v.body.rotation.z = Math.sin(time * 6) * 0.12;
+      } else if (d.state === 'riding') {
+        // おんぶされてゆらゆら
+        v.body.rotation.z = Math.sin(time * 3.4 + d.wobble) * 0.14;
+        v.body.rotation.x = Math.sin(time * 2.7 + d.wobble) * 0.1;
       }
     }
     // 消えたドーナツのビューを片づけ

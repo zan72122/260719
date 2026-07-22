@@ -155,7 +155,7 @@ Game.isTileClogged = function (tile) {
   const c = tileCenter(tile);
   const r2 = (0.75 * CELL) * (0.75 * CELL);
   return Game.donuts.some(d =>
-    d.state === 'belt' && d.stopped && dist2(d.x, d.y, c.x, c.y) < r2);
+    d.state === 'belt' && (d.stopped || d.jammed || d.overlapS > 0.3) && dist2(d.x, d.y, c.x, c.y) < r2);
 };
 
 /* ============================================================
@@ -428,6 +428,12 @@ Game.spawnFromSpawner = function (tile, manual) {
 
 Game.collectDonut = function (donut, tile) {
   if (donut.state === 'collect') return;
+  // 2階建てなら上の子もいっしょに回収（2個ぶんのチャイム！）
+  const rider = donut.rider;
+  if (rider) {
+    donut.rider = null;
+    rider.carrier = null;
+  }
   donut.state = 'collect';
   donut.stateTime = 0;
   const c = tileCenter(tile);
@@ -449,6 +455,10 @@ Game.collectDonut = function (donut, tile) {
     Render3D.punch(0.7);                 // 出荷！カメラがズームバウンス
     Render3D.shake(8);
     Render3D.flash(c.x, c.y, '#fff3b0', 210);
+  }
+  if (rider && !rider.dead) {
+    if (rider.isVeggie) Game.spitDonut(rider, tile);
+    else Game.collectDonut(rider, tile);
   }
 };
 
@@ -503,6 +513,21 @@ Game.startJump = function (donut, tile) {
 };
 
 function startFall(donut, dir) {
+  // 上に乗っていた子もいっしょにころがりおちる
+  if (donut.rider) {
+    const r = donut.rider;
+    donut.rider = null;
+    r.carrier = null;
+    if (!r.dead && r.state === 'riding') {
+      r.state = 'fall';
+      r.stateTime = 0;
+      r.aux = { dir: randInt(0, 3) };
+    }
+  }
+  if (donut.carrier) {
+    donut.carrier.rider = null;
+    donut.carrier = null;
+  }
   donut.state = 'fall';
   donut.stateTime = 0;
   donut.aux = { dir: dir !== undefined ? dir : donut.exitDir };
@@ -615,6 +640,8 @@ Game.flipBoard = function () {
   if (Game.flipCooldown > 0) return;
   Game.flipCooldown = 3;
   const cols = Game.cols, rows = Game.rows;
+  // 2階建てはほどいてから
+  for (const d of Game.donuts) { d.rider = null; d.carrier = null; }
   // 途中状態のドーナツはポンっと消す
   Game.donuts = Game.donuts.filter(d => {
     if (d.state === 'belt' || d.state === 'carried') return true;
@@ -683,12 +710,12 @@ function donutWorldPos(d) {
   const cx = (d.tx + 0.5) * CELL, cy = (d.ty + 0.5) * CELL;
   if (d.t < 0.5) {
     const k = (0.5 - d.t) * CELL;
-    d.x = cx - DX[d.entryDir] * k;
-    d.y = cy - DY[d.entryDir] * k;
+    d.x = cx - DX[d.entryDir] * k + d.ox;
+    d.y = cy - DY[d.entryDir] * k + d.oy;
   } else {
     const k = (d.t - 0.5) * CELL;
-    d.x = cx + DX[d.exitDir] * k;
-    d.y = cy + DY[d.exitDir] * k;
+    d.x = cx + DX[d.exitDir] * k + d.ox;
+    d.y = cy + DY[d.exitDir] * k + d.oy;
   }
 }
 
@@ -709,7 +736,10 @@ function fireCenter(d) {
 
 function updateBeltDonut(d, dt) {
   if (d.stopped) return;
-  let remaining = BASE_SPEED * Game.flow() * dt;
+  d.revHold = false;
+  // 押し付けが深いほど遅くなる（連続減速 → 隊列が静かに落ち着く）
+  const contactSlow = clamp(1 - d.overlapS * 1.35, 0, 1);
+  let remaining = BASE_SPEED * Game.flow() * dt * contactSlow;
   let guard = 0;
   while (remaining > 0 && d.state === 'belt' && guard++ < 8) {
     const tile = tileAt(d.tx, d.ty);
@@ -735,7 +765,15 @@ function updateBeltDonut(d, dt) {
         d.t = 0.5;
         if (fireCenter(d)) break;
       }
+    } else if (d.exitDir === oppositeDir(d.entryDir) && d.t <= 0.51 &&
+               (d.reverseLock > 0 || d.pressure >= 2)) {
+      // 反転ヒステリシス：ロック中 or 押し合い中は境界でふんばる（押し相撲）
+      d.t = 0.5;
+      d.revHold = true;
+      break;
     } else {
+      // 反転を実行するときはしばらく再反転禁止
+      if (d.exitDir === oppositeDir(d.entryDir) && d.t <= 0.51) d.reverseLock = 0.62;
       const step = Math.min(remaining, 1.0 - d.t);
       d.t += step;
       remaining -= step;
@@ -760,33 +798,222 @@ function updateBeltDonut(d, dt) {
 }
 
 function resolveStops() {
+  // ゲートによる停止のみ。渋滞の伝播は「ふれあい物理」が担う
   const ds = Game.donuts;
   for (const d of ds) d.stopped = false;
-  // ゲートによる停止
   for (const d of ds) {
     if (d.state !== 'belt') continue;
     const tile = tileAt(d.tx, d.ty);
     if (tile && tile.type === 'gate' && !tile.open && d.t >= 0.29 && d.t < 0.5) d.stopped = true;
   }
-  // 前がつまってたら止まる（チェーン）
-  const minD2 = (0.58 * CELL) * (0.58 * CELL);
-  for (let pass = 0; pass < 4; pass++) {
-    let changed = false;
-    for (const d of ds) {
-      if (d.state !== 'belt' || d.stopped) continue;
-      const hv = headingVec(d);
-      for (const e of ds) {
-        if (e === d || e.state !== 'belt' || !e.stopped) continue;
-        const ex = e.x - d.x, ey = e.y - d.y;
-        if (ex * ex + ey * ey < minD2 && (ex * hv.x + ey * hv.y) > 0) {
-          d.stopped = true;
-          changed = true;
-          break;
+}
+
+/* ============================================================
+ * ふれあい物理 — 「やわらかい世界では、衝突は事故ではなく“ふれあい”になる」
+ *  位置ベース（PBD）で押し合いを解く。ばねを使わないので発振しない。
+ *  ・おしくらまんじゅう: 重なりを直接押し戻し、深さは squish 描画へ
+ *  ・ヒステリシス: 反転ロック + 押し合い中は境界でふんばる（押し相撲）
+ *  ・ところてん圧力弁: 3方向以上から圧されたら横へ「にゅるっ」
+ *  ・ラッキー乗り上げ: 圧の中心の子はとなりの上へぽんっ（2階建てまで）
+ * ============================================================ */
+const CONTACT_D = 54;                 // 接触直径
+const CONTACT_RELAX = 0.3;            // 1回の解決率（低め＝むにゅっと感）
+const PAIR_CAP = 320;                 // 1フレームの処理ペア上限
+
+function solveContacts(dt) {
+  const list = [];
+  for (const d of Game.donuts) {
+    d.overlap = 0;
+    d.pressure = 0;
+    d.pressN = null;
+    d.reverseLock = Math.max(0, d.reverseLock - dt);
+    d.squeezeCd = Math.max(0, d.squeezeCd - dt);
+    if (d.state === 'belt' || d.state === 'carried') list.push(d);
+  }
+  const n = list.length;
+  if (n < 2) return;
+  const D2 = CONTACT_D * CONTACT_D;
+
+  for (let iter = 0; iter < 2; iter++) {
+    let pairs = 0;
+    for (let i = 0; i < n && pairs < PAIR_CAP; i++) {
+      const a = list[i];
+      for (let j = i + 1; j < n && pairs < PAIR_CAP; j++) {
+        const b = list[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        if (dx > CONTACT_D || dx < -CONTACT_D || dy > CONTACT_D || dy < -CONTACT_D) continue;
+        const dd = dx * dx + dy * dy;
+        if (dd >= D2) continue;
+        pairs++;
+        let dist = Math.sqrt(dd);
+        if (dist < 1) {   // 完全一致（クローン直後など）は id で向きを決める
+          const ja = a.id * 2.399;
+          dx = Math.cos(ja); dy = Math.sin(ja); dist = 1;
+        } else {
+          dx /= dist; dy /= dist;
         }
+        const pen = CONTACT_D - dist;
+        const ov = pen / CONTACT_D;
+        if (iter === 0) {
+          a.pressure++; b.pressure++;
+          if (ov > a.overlap) { a.overlap = ov; a.pressN = b; }
+          if (ov > b.overlap) { b.overlap = ov; b.pressN = a; }
+        }
+        // 重み: 指でつかんでいる子は不動、ゲート停止はどっしり、渋滞中はやや重い
+        const wa = a.state === 'carried' ? 0 : (a.stopped ? 0.22 : (a.jammed ? 0.55 : 1));
+        const wb = b.state === 'carried' ? 0 : (b.stopped ? 0.22 : (b.jammed ? 0.55 : 1));
+        const ws = wa + wb;
+        if (ws <= 0) continue;
+        const push = pen * CONTACT_RELAX;
+        const pa = push * (wa / ws), pb = push * (wb / ws);
+        a.ox -= dx * pa; a.oy -= dy * pa; a.x -= dx * pa; a.y -= dy * pa;
+        b.ox += dx * pb; b.oy += dy * pb; b.x += dx * pb; b.y += dy * pb;
       }
     }
-    if (!changed) break;
   }
+
+  // 圧力の出口: ラッキー乗り上げ / ところてん
+  Game.valveCd = Math.max(0, (Game.valveCd || 0) - dt);
+  for (const d of list) {
+    if (d.state !== 'belt' || d.squeezeCd > 0) continue;
+    if (d.pressure >= 3 && d.overlap > 0.06 && !d.rider && !d.carrier) {
+      const nb = d.pressN;
+      if (nb && nb.state === 'belt' && !nb.rider && !nb.carrier && Math.random() < dt * 2.2) {
+        mountRider(d, nb);
+        continue;
+      }
+      if (d.pressure >= 4 && Game.valveCd <= 0 && Math.random() < dt * 3.5) {
+        squeezeOut(d);
+        Game.valveCd = 0.4;
+      }
+    }
+  }
+
+  // 押し相撲のけむり
+  Game.sumoT = (Game.sumoT || 0) - dt;
+  if (Game.sumoT <= 0) {
+    Game.sumoT = 0.5;
+    const s = list.find(d => d.revHold && d.pressure >= 2);
+    if (s) {
+      Particles.puff(s.x + rand(-14, 14), s.y + rand(-14, 14), 2, '#ffffff');
+      if (Math.random() < 0.3) AudioSys.sfx('giggle');
+    }
+  }
+}
+
+// オフセットの落ち着き: 進行方向成分は t へ移し、のこりはベルトが中央へ戻す
+function settleContacts(dt) {
+  for (const d of Game.donuts) {
+    if (d.state === 'belt') {
+      let ox = d.ox, oy = d.oy;
+      if (ox !== 0 || oy !== 0) {
+        const hv = headingVec(d);
+        const along = ox * hv.x + oy * hv.y;
+        // とじたゲートは位置制約としても硬い（圧力ですり抜けない）
+        let hi = 0.995;
+        const under = tileAt(d.tx, d.ty);
+        const gateClosed = under && under.type === 'gate' && !under.open;
+        if (gateClosed && d.t <= 0.31) hi = 0.30;
+        const newT = clamp(d.t + along / CELL, -0.35, hi);
+        const used = (newT - d.t) * CELL;
+        d.t = newT;
+        ox -= hv.x * used;
+        oy -= hv.y * used;
+        if (gateClosed) {
+          // バーの先へ進む方向のオフセットはすてる
+          const fwd = ox * hv.x + oy * hv.y;
+          if (fwd > 0) { ox -= hv.x * fwd; oy -= hv.y * fwd; }
+        }
+        const decay = 1 - Math.min(1, dt * 3.2);
+        d.ox = clamp(ox * decay, -46, 46);
+        d.oy = clamp(oy * decay, -46, 46);
+      }
+      // 押されて動けない子は jammed（0.25秒窓の実移動量で判定 → マイクロ振動に強い）
+      d.anchorT -= dt;
+      if (d.anchorT <= 0) {
+        const net = Math.hypot(d.x - d.anchorX, d.y - d.anchorY);
+        if (!d.jammed) {
+          if (net < 11 && d.overlapS > 0.03) d.jammed = true;
+        } else if (d.overlapS < 0.015) {
+          d.jammed = false;
+        }
+        d.anchorX = d.x; d.anchorY = d.y;
+        d.anchorT = 0.25;
+      }
+    } else {
+      d.ox *= 0.8; d.oy *= 0.8;
+      d.jammed = false;
+    }
+    d.overlapS += (Math.min(1, d.overlap * 5.5) - d.overlapS) * Math.min(1, dt * 10);
+    d.prevX = d.x; d.prevY = d.y;
+  }
+}
+
+// ラッキー乗り上げ（2階建てドーナツ）
+function mountRider(d, carrier) {
+  d.state = 'riding';
+  d.stateTime = 0;
+  d.carrier = carrier;
+  carrier.rider = d;
+  d.ox = d.oy = 0;
+  d.stopped = false;
+  AudioSys.sfx('boing');
+  Particles.hearts(d.x, d.y, 2);
+}
+
+function dismountRider(d) {
+  const c = d.carrier;
+  if (c) c.rider = null;
+  d.carrier = null;
+  if (d.dead || d.state !== 'riding') return;
+  const tx = Math.floor(d.x / CELL), ty = Math.floor(d.y / CELL);
+  const under = tileAt(tx, ty);
+  if (under && TILE_DEFS[under.type].walkable) {
+    d.state = 'belt';
+    d.tx = tx; d.ty = ty;
+    d.t = 0.5;
+    d.entryDir = under.dir;
+    d.exitDir = under.dir;
+    d.centerFired = true;
+    d.squeezeCd = 1.5;
+    d.ox = d.oy = 0;
+  } else {
+    startFall(d, randInt(0, 3));
+  }
+}
+
+// ところてん式に横へ「にゅるっ」
+function squeezeOut(d) {
+  const hv = headingVec(d);
+  const sides = Math.random() < 0.5
+    ? [[hv.y, -hv.x], [-hv.y, hv.x]]
+    : [[-hv.y, hv.x], [hv.y, -hv.x]];
+  for (const [px, py] of sides) {
+    const tx = d.tx + px, ty = d.ty + py;
+    const nt = tileAt(tx, ty);
+    if (nt && TILE_DEFS[nt.type].walkable) {
+      hopTo(d, tx, ty);
+      return;
+    }
+  }
+  // 左右がなければうしろへ
+  const bx = d.tx - hv.x, by = d.ty - hv.y;
+  const bt = tileAt(bx, by);
+  if (bt && TILE_DEFS[bt.type].walkable) hopTo(d, bx, by);
+}
+
+function hopTo(d, tx, ty) {
+  d.state = 'spit';
+  d.stateTime = 0;
+  d.aux = {
+    sx: d.x, sy: d.y,
+    ex: (tx + 0.5) * CELL, ey: (ty + 0.5) * CELL,
+    ltx: tx, lty: ty,
+  };
+  d.ox = d.oy = 0;
+  d.squeezeCd = 3;
+  AudioSys.sfx('pokon');
+  Particles.puff(d.x, d.y, 3, '#ffffff');
 }
 
 function updateDonuts(dt) {
@@ -1024,8 +1251,23 @@ function updateDonuts(dt) {
         d.stateTime += dt;
         if (d.stateTime > 7) startFall(d, randInt(0, 3));   // 保険
         break;
+
+      case 'riding': {   // 2階建て: 下の子について行く
+        const c = d.carrier;
+        if (!c || c.dead || c.state !== 'belt') { dismountRider(d); break; }
+        d.stateTime += dt;
+        d.x += (c.x - d.x) * Math.min(1, dt * 14);
+        d.y += (c.y - d.y) * Math.min(1, dt * 14);
+        d.z += ((c.z + 40) - d.z) * Math.min(1, dt * 9);
+        if (d.stateTime > 12) dismountRider(d);   // そろそろおりる
+        break;
+      }
     }
   }
+
+  // ふれあい物理
+  solveContacts(dt);
+  settleContacts(dt);
 
   Game.donuts = Game.donuts.filter(d => !d.dead);
 }
@@ -1056,7 +1298,7 @@ function updateGuide(dt) {
 function hitDonut(wx, wy) {
   for (let i = Game.donuts.length - 1; i >= 0; i--) {
     const d = Game.donuts[i];
-    if (d.state !== 'belt' && d.state !== 'carried') continue;
+    if (d.state !== 'belt' && d.state !== 'carried' && d.state !== 'riding') continue;
     if (dist2(wx, wy, d.x, d.y) < (DONUT_R * 1.35) ** 2) return d;
   }
   return null;
@@ -1095,10 +1337,14 @@ function onPointerDown(e) {
   // 1) ドーナツをつかむ
   const d = hitDonut(w.x, w.y);
   if (d) {
+    // 2階建ての子をつまんだら／下の子をつまんだら、そっとほどく
+    if (d.carrier) { d.carrier.rider = null; d.carrier = null; }
+    if (d.rider) dismountRider(d.rider);
     d.state = 'carried';
     d.stopped = false;
     d.targetS = 1.18;
     d.spin = 0;
+    d.ox = d.oy = 0;
     Game.pointers.set(e.pointerId, { kind: 'grab', donut: d });
     AudioSys.sfx('boing');
     Particles.hearts(d.x, d.y, 3);
