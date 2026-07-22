@@ -129,10 +129,10 @@ window.GAMES.carousel = (() => {
 
     /* --- レバー台 --- */
     const cons = G3.add(scene, new THREE.BoxGeometry(110, 150, 90),
-      new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.45 }), -470, 75, 560);
+      new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.45 }), -280, 75, 620);
     cons.castShadow = true;
     leverG = new THREE.Group();
-    leverG.position.set(-470, 150, 560);
+    leverG.position.set(-280, 150, 620);
     scene.add(leverG);
     G3.add(leverG, new THREE.BoxGeometry(14, 100, 12), mats.steel, 0, 40, 0);
     G3.add(leverG, new THREE.SphereGeometry(17, 12, 10), mats.darkPlastic, 0, 92, 0);
@@ -140,7 +140,7 @@ window.GAMES.carousel = (() => {
 
     /* --- 人形 --- */
     dolls = [];
-    [[0xd85a4a, 420, 560], [0x4a9ad8, 290, 650]].forEach(([col, x, z], i) => {
+    [[0xd85a4a, 350, 600], [0x4a9ad8, 180, 680]].forEach(([col, x, z], i) => {
       const d = G3.doll({ shirt: col });
       d.g.position.set(x, 0, z);
       scene.add(d.g);

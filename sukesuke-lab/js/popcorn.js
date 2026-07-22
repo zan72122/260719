@@ -316,7 +316,7 @@ window.GAMES.popcorn = (() => {
     live.forEach((kd) => {
       const i = kernelData.indexOf(kd);
       kd.e += heat * dt * (0.55 + hash(i, 4) * 0.5);
-      if (kd.e > 2.2) popKernel(kd, i);
+      if (kd.e > 1.5) popKernel(kd, i);
     });
     /* 豆の描画 (熱いほどゆれる) */
     let ki = 0;
