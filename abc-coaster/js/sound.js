@@ -1,7 +1,8 @@
 /* =========================================================
  * sound.js — WebAudio 効果音シンセ + 英語読み上げ (TTS)
- * iOS Safari 対策: 最初のタッチで AudioContext と
- * speechSynthesis の両方をアンロックする
+ * コースター用 (ガタンゴトン・ヒュー・発射) と
+ * ミニゲーム用 (ポンプ・空気漏れ・ドラムロール) を追加
+ * iOS Safari 対策: 最初のタッチで AudioContext と TTS をアンロック
  * ========================================================= */
 
 const Sound = (() => {
@@ -26,7 +27,6 @@ const Sound = (() => {
     if (!('speechSynthesis' in window)) return;
     const voices = speechSynthesis.getVoices();
     if (!voices.length) return;
-    // iOS の自然な英語音声を優先
     const prefer = ['Samantha', 'Karen', 'Daniel', 'Google US English'];
     for (const name of prefer) {
       const v = voices.find(v => v.name === name);
@@ -46,7 +46,6 @@ const Sound = (() => {
     unlocked = true;
     const c = ensureCtx();
     if (c && c.state === 'suspended') c.resume();
-    // 無音の発話で TTS をアンロック
     if ('speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(' ');
       u.volume = 0;
@@ -75,7 +74,7 @@ const Sound = (() => {
     osc.stop(t0 + dur + 0.05);
   }
 
-  function noise({ dur = 0.2, vol = 0.3, freq = 1200, delay = 0 }) {
+  function noise({ dur = 0.2, vol = 0.3, freq = 1200, delay = 0, q = 1 }) {
     const c = ensureCtx();
     if (!c) return;
     const t0 = c.currentTime + delay;
@@ -88,6 +87,7 @@ const Sound = (() => {
     const filter = c.createBiquadFilter();
     filter.type = 'bandpass';
     filter.frequency.value = freq;
+    filter.Q.value = q;
     const g = c.createGain();
     g.gain.setValueAtTime(vol, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
@@ -95,46 +95,24 @@ const Sound = (() => {
     src.start(t0);
   }
 
-  /* ---------- ゲーム効果音 ---------- */
+  /* ---------- 効果音 ---------- */
 
   const fx = {
-    // 衝突音: 重い文字ほど低い「ドスン」、軽い文字ほど高い「コツン」
-    thud(mass, strength = 1) {
-      const f = Math.max(60, 340 - mass * 55);
-      tone({ freq: f, type: 'triangle', dur: 0.12, vol: Math.min(0.5, 0.14 * strength), slideTo: f * 0.5 });
-      noise({ dur: 0.05, vol: Math.min(0.25, 0.06 * strength), freq: 400 + f });
-    },
-    // i の点の音: キラッとした鈴の音
-    dotChime() {
-      tone({ freq: 1660, type: 'sine', dur: 0.3, vol: 0.25 });
-      tone({ freq: 2490, type: 'sine', dur: 0.4, vol: 0.15, delay: 0.03 });
-    },
-    boing() {
-      tone({ freq: 160, type: 'sine', dur: 0.28, vol: 0.35, slideTo: 420 });
-    },
+    click() { tone({ freq: 700, type: 'sine', dur: 0.06, vol: 0.25, slideTo: 1000 }); },
     pop() {
       tone({ freq: 420, type: 'square', dur: 0.09, vol: 0.22, slideTo: 900 });
       noise({ dur: 0.08, vol: 0.2, freq: 2000 });
     },
-    click() {
-      tone({ freq: 700, type: 'sine', dur: 0.06, vol: 0.25, slideTo: 1000 });
-    },
-    spawn() {
-      tone({ freq: 500, type: 'sine', dur: 0.14, vol: 0.25, slideTo: 950 });
-    },
     chime() {
       [523, 659, 784].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.35, vol: 0.2, delay: i * 0.07 }));
     },
-    wrong() {
-      tone({ freq: 260, type: 'sine', dur: 0.18, vol: 0.25, slideTo: 190 });
-    },
-    whoosh() {
-      noise({ dur: 0.35, vol: 0.3, freq: 900 });
-    },
     star() {
-      tone({ freq: 1046, type: 'sine', dur: 0.18, vol: 0.25 });
-      tone({ freq: 1568, type: 'sine', dur: 0.3, vol: 0.2, delay: 0.09 });
+      tone({ freq: 1046, type: 'sine', dur: 0.15, vol: 0.25 });
+      tone({ freq: 1568, type: 'sine', dur: 0.28, vol: 0.2, delay: 0.08 });
     },
+    boing() { tone({ freq: 160, type: 'sine', dur: 0.28, vol: 0.35, slideTo: 420 }); },
+    wrong() { tone({ freq: 260, type: 'sine', dur: 0.18, vol: 0.25, slideTo: 190 }); },
+    whoosh() { noise({ dur: 0.35, vol: 0.3, freq: 900 }); },
     tada() {
       const notes = [523, 659, 784, 1046, 784, 1046];
       notes.forEach((f, i) => {
@@ -147,9 +125,57 @@ const Sound = (() => {
       [880, 1174, 1568].forEach((f, i) =>
         tone({ freq: f, type: 'sine', dur: 0.5, vol: 0.15, delay: 0.1 + i * 0.08 }));
     },
-    roll() {
-      noise({ dur: 0.12, vol: 0.05, freq: 300 });
+
+    /* --- コースター用 --- */
+    clank() { // チェーンリフトのガチャン
+      tone({ freq: 180, type: 'square', dur: 0.04, vol: 0.12 });
+      noise({ dur: 0.03, vol: 0.12, freq: 1400 });
     },
+    wheee() { // 下り坂の「ヒュー!」
+      tone({ freq: 500, type: 'sine', dur: 0.7, vol: 0.22, slideTo: 1250 });
+    },
+    drop() { // 落下開始の「フワッ」
+      tone({ freq: 900, type: 'sine', dur: 0.45, vol: 0.2, slideTo: 350 });
+    },
+    launch() { // J のジャンプ発射
+      tone({ freq: 300, type: 'sawtooth', dur: 0.5, vol: 0.22, slideTo: 1200 });
+      noise({ dur: 0.4, vol: 0.25, freq: 1800 });
+    },
+    bump() { // G のバンパー衝突
+      tone({ freq: 120, type: 'square', dur: 0.15, vol: 0.3, slideTo: 80 });
+      tone({ freq: 500, type: 'sine', dur: 0.3, vol: 0.2, slideTo: 900, delay: 0.12 });
+    },
+    depart() { // 出発のベル
+      [880, 880].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.15, vol: 0.25, delay: i * 0.22 }));
+    },
+
+    /* --- ふうせんもじ用 --- */
+    pump() { // 空気入れ「シュコッ」
+      noise({ dur: 0.18, vol: 0.3, freq: 700, q: 2 });
+      tone({ freq: 220, type: 'sine', dur: 0.15, vol: 0.15, slideTo: 320 });
+    },
+    inflate() { // ふくらむ「キュゥ」
+      tone({ freq: 300, type: 'sine', dur: 0.25, vol: 0.15, slideTo: 520 });
+    },
+    leak() { // 空気漏れ「プスー!」(おなら風)
+      const c = ensureCtx();
+      if (!c) return;
+      for (let i = 0; i < 9; i++) {
+        tone({ freq: 90 + Math.random() * 60, type: 'sawtooth', dur: 0.1, vol: 0.2, delay: i * 0.09, slideTo: 70 });
+      }
+      noise({ dur: 0.9, vol: 0.22, freq: 500, q: 3 });
+    },
+    floatUp() { // ふわ~っと上昇
+      [392, 494, 587, 784].forEach((f, i) =>
+        tone({ freq: f, type: 'sine', dur: 0.4, vol: 0.16, delay: i * 0.14 }));
+    },
+
+    /* --- さかさまサーカス用 --- */
+    drumroll() {
+      for (let i = 0; i < 16; i++) noise({ dur: 0.05, vol: 0.14, freq: 250, delay: i * 0.055, q: 2 });
+    },
+    cymbal() { noise({ dur: 0.7, vol: 0.3, freq: 5000, q: 0.6 }); },
+    spin() { tone({ freq: 400, type: 'sine', dur: 0.5, vol: 0.15, slideTo: 900 }); },
   };
 
   /* ---------- 読み上げ ---------- */
@@ -170,7 +196,6 @@ const Sound = (() => {
     speechSynthesis.speak(u);
   }
 
-  // 少し間をあけて続けて話す ("B!" → "buh" → "Ball!")
   function speakSequence(parts, gap = 500) {
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
@@ -185,23 +210,7 @@ const Sound = (() => {
     next();
   }
 
-  function speakLetter(ch) {
-    const info = window.GameData.LETTERS[ch.toUpperCase()];
-    if (!info) return;
-    speakSequence([
-      { text: ch.toUpperCase() + '!', wait: 700 },
-      { text: info.phonic, rate: 0.7, wait: 700 },
-      { text: info.word + '!', wait: 0 },
-    ]);
-  }
-
-  function speakWord(word) {
-    const parts = word.split('').map(ch => ({ text: ch, wait: 550, pitch: 1.2 }));
-    parts.push({ text: word + '!', rate: 0.8, wait: 0 });
-    speakSequence(parts);
-  }
-
-  return { unlock, fx, speak, speakSequence, speakLetter, speakWord };
+  return { unlock, fx, speak, speakSequence };
 })();
 
 window.Sound = Sound;
