@@ -44,7 +44,7 @@ const Render3D = (() => {
     renderer.shadowMap.type = T.PCFSoftShadowMap;
 
     scene = new T.Scene();
-    camera = new T.OrthographicCamera(-1, 1, 1, -1, 10, 5000);
+    camera = new T.PerspectiveCamera(46, 1, 50, 6000);
     scene.add(camera);
 
     // トゥーン用グラデーション（3段）
@@ -650,34 +650,42 @@ const Render3D = (() => {
     const landscapeScreen = vw >= vh;
     const rotated = landscapeBoard !== landscapeScreen;
     const cx = bw / 2, cz = bh / 2;
-    const elev = 0.99;
-    const D = 1700;
-    const ey = Math.sin(elev) * D;
-    const eh = Math.cos(elev) * D;
-    if (!rotated) camera.position.set(cx, ey, cz + eh);
-    else camera.position.set(cx + eh, ey, cz);
+    const elev = Math.PI / 4;          // 45° 見下ろし
+    const aspect = vw / Math.max(1, vh);
+    camera.aspect = aspect;
+
+    // 視線方向（縦画面では 90° 回した方位から）
+    const ey = Math.sin(elev), eh = Math.cos(elev);
+    const u = rotated ? new T.Vector3(eh, ey, 0) : new T.Vector3(0, ey, eh);
+
+    // 仮距離でビュー座標系を作り、全コーナーが収まる最小距離を閉形式で求める
+    const D0 = 1000;
+    camera.position.set(cx + u.x * D0, u.y * D0, cz + u.z * D0);
     camera.up.set(0, 1, 0);
     camera.lookAt(cx, 0, cz);
     camera.updateMatrixWorld(true);
-    camFX.basePos.copy(camera.position);
-
     const inv = camera.matrixWorldInverse;
-    let maxX = 1, maxY = 1;
-    for (const x of [-40, bw + 40]) {
-      for (const z of [-40, bh + 40]) {
-        for (const y of [-20, 190]) {
+
+    const tanV = Math.tan((camera.fov * Math.PI / 180) / 2);
+    const tanH = tanV * aspect;
+    let D = 400;
+    for (const x of [-28, bw + 28]) {
+      for (const z of [-28, bh + 28]) {
+        for (const y of [-10, 150]) {
           _v3.set(x, y, z).applyMatrix4(inv);
-          maxX = Math.max(maxX, Math.abs(_v3.x));
-          maxY = Math.max(maxY, Math.abs(_v3.y));
+          const qx = _v3.x, qy = _v3.y, qz = _v3.z + D0;
+          D = Math.max(D, qz + Math.abs(qy) * 1.03 / tanV);
+          D = Math.max(D, qz + Math.abs(qx) * 1.02 / tanH);
         }
       }
     }
-    const aspect = vw / Math.max(1, vh);
-    let hw = maxX * 1.03, hh = maxY * 1.05;
-    if (hw / hh < aspect) hw = hh * aspect; else hh = hw / aspect;
-    camera.left = -hw; camera.right = hw;
-    camera.top = hh; camera.bottom = -hh;
-    camera.near = 10; camera.far = 5000;
+
+    camera.position.set(cx + u.x * D, u.y * D, cz + u.z * D);
+    camera.lookAt(cx, 0, cz);
+    camera.updateMatrixWorld(true);
+    camFX.basePos.copy(camera.position);
+    camera.near = Math.max(40, D * 0.18);
+    camera.far = D * 3 + 1500;
     camera.zoom = 1;
     camera.updateProjectionMatrix();
   }
