@@ -107,6 +107,8 @@ class Donut {
     this.decor = { shape: 'ring', frost: null, glaze: false, sprinkles: null, cream: false, topper: null };
     this.decorRev = 0;
     this.sprinklePts = null;
+    this.isVeggie = false;   // やさいスイッチで変身中
+    this.hidden = false;     // 大砲のなかなど
     this.aux = {};
   }
 

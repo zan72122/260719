@@ -42,10 +42,11 @@ html, body {
 }
 .hud-btn:active { transform: scale(0.85); }
 
-#btn-levels  { top:    calc(10px + env(safe-area-inset-top));    left:  calc(10px + env(safe-area-inset-left)); }
-#btn-sound   { top:    calc(10px + env(safe-area-inset-top));    right: calc(10px + env(safe-area-inset-right)); }
-#btn-rainbow { bottom: calc(10px + env(safe-area-inset-bottom)); left:  calc(10px + env(safe-area-inset-left)); }
-#btn-turbo   { bottom: calc(10px + env(safe-area-inset-bottom)); right: calc(10px + env(safe-area-inset-right)); }
+#btn-levels    { top:    calc(10px + env(safe-area-inset-top));    left:  calc(10px + env(safe-area-inset-left)); }
+#btn-sound     { top:    calc(10px + env(safe-area-inset-top));    right: calc(10px + env(safe-area-inset-right)); }
+#btn-rainbow   { bottom: calc(10px + env(safe-area-inset-bottom)); left:  calc(10px + env(safe-area-inset-left)); }
+#btn-donutrain { bottom: calc(10px + env(safe-area-inset-bottom)); left:  calc(78px + env(safe-area-inset-left)); }
+#btn-turbo     { bottom: calc(10px + env(safe-area-inset-bottom)); right: calc(10px + env(safe-area-inset-right)); }
 
 /* ---------- 設置パレット ---------- */
 #palette {
@@ -53,14 +54,14 @@ html, body {
   left: calc(10px + env(safe-area-inset-left));
   top: 50%;
   transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 8px;
   z-index: 20;
 }
 .pal-btn {
-  width: 50px;
-  height: 50px;
+  width: 46px;
+  height: 46px;
   border: none;
   border-radius: 16px;
   font-size: 26px;

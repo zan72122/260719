@@ -164,6 +164,39 @@ const Donut3D = (() => {
     return g;
   }
 
+  /* ---------- やさいの組み立て ---------- */
+  function buildVeggie(body, seed) {
+    if (seed % 2 === 0) {
+      // ブロッコリー
+      const stem = new T.Mesh(new T.CylinderGeometry(6, 8, 15, 8), toonMat('#cfe8b0'));
+      stem.position.y = -4;
+      stem.castShadow = true;
+      body.add(stem);
+      const rng = mulberry32(seed);
+      for (let i = 0; i < 6; i++) {
+        const fl = new T.Mesh(new T.SphereGeometry(9 + rng() * 4, 8, 6), toonMat('#4e9b4e'));
+        const a = rng() * TAU;
+        const r = 6 + rng() * 7;
+        fl.position.set(Math.cos(a) * r, 8 + rng() * 8, Math.sin(a) * r);
+        fl.castShadow = true;
+        body.add(fl);
+      }
+    } else {
+      // にんじん（ねっころがってる）
+      const carrot = new T.Mesh(new T.ConeGeometry(11, 40, 9), toonMat('#f28c3a'));
+      carrot.rotation.z = -Math.PI / 2;
+      carrot.position.y = 0;
+      carrot.castShadow = true;
+      body.add(carrot);
+      for (let i = 0; i < 3; i++) {
+        const leaf = new T.Mesh(new T.ConeGeometry(3.5, 14, 5), toonMat('#5cae52'));
+        leaf.position.set(-22, 4, (i - 1) * 5);
+        leaf.rotation.z = 0.9 + i * 0.25;
+        body.add(leaf);
+      }
+    }
+  }
+
   /* ---------- デコの組み立て ---------- */
   function rebuildDecor(view) {
     const d = view.donut;
@@ -173,6 +206,13 @@ const Donut3D = (() => {
       const ch = body.children[i];
       body.remove(ch);
       if (ch.isInstancedMesh) ch.dispose();
+    }
+
+    // やさいモード
+    if (d.isVeggie) {
+      buildVeggie(body, d.seed);
+      view.decorRev = d.decorRev;
+      return;
     }
 
     const shape = d.decor.shape;
@@ -277,11 +317,13 @@ const Donut3D = (() => {
       const v = ensure(d);
       if (v.decorRev !== d.decorRev) rebuildDecor(v);
 
+      v.group.visible = !d.hidden;
       v.group.position.set(d.x, DONUT_BASE_Y + d.z, d.y);
 
-      // スケール（squish + じたばた）
+      // スケール（squish + じたばた + かみなりのビリビリ）
       let sq = Math.sin(time * 5 + d.wobble) * 0.02;
       if (d.stopped) sq += Math.sin(time * 16 + d.wobble) * 0.045;
+      if (game.stunT > 0) sq += Math.sin(time * 40 + d.wobble) * 0.06;
       const a = d.alpha;
       v.body.scale.set(d.sx * (1 + sq) * a, Math.max(0.02, d.sy * (1 - sq)) * a, d.sx * (1 + sq) * a);
 

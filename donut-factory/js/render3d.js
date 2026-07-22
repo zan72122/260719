@@ -773,6 +773,48 @@ const Render3D = (() => {
     }
   }
 
+  /* ============================ かみなり雲 ============================ */
+
+  let cloudGroup = null;
+  function ensureCloud() {
+    if (cloudGroup) return cloudGroup;
+    cloudGroup = new T.Group();
+    const light = Donut3D.toonMat('#f4f2fa');
+    const dark = Donut3D.toonMat('#b9b2cc');
+    const puffs = [[0, 2, 0, 27], [22, 5, 8, 20], [-22, 3, 6, 20], [9, 10, -13, 18], [-7, 0, 15, 17]];
+    for (const [x, y, z, r] of puffs) {
+      const s = new T.Mesh(new T.SphereGeometry(r, 10, 8), light);
+      s.position.set(x, y, z);
+      s.castShadow = true;
+      cloudGroup.add(s);
+    }
+    const base = new T.Mesh(new T.SphereGeometry(25, 10, 8), dark);
+    base.scale.set(1.35, 0.4, 1.1);
+    base.position.y = -13;
+    cloudGroup.add(base);
+    scene.add(cloudGroup);
+    return cloudGroup;
+  }
+
+  function updateCloud(game) {
+    if (game.cloud) {
+      const cg = ensureCloud();
+      cg.visible = true;
+      cg.position.set(game.cloud.x, 190 + Math.sin(game.time * 1.8) * 8, game.cloud.y);
+      cg.rotation.y = game.time * 0.3;
+      if (Math.random() < 0.06) {
+        Particles.spawn({
+          kind: 'sparkle',
+          x: game.cloud.x + rand(-16, 16), z: game.cloud.y + rand(-16, 16),
+          h: 165, vx: 0, vz: 0, vh: -90, g: 0,
+          maxLife: 0.3, size: 9, color: '#fff06a',
+        });
+      }
+    } else if (cloudGroup) {
+      cloudGroup.visible = false;
+    }
+  }
+
   /* ============================ 毎フレーム ============================ */
 
   function render(game, dt) {
@@ -784,6 +826,7 @@ const Render3D = (() => {
     Particles.sync();
     updateFX(dt);
     updateEnvironment(game, dt);
+    updateCloud(game);
 
     if (game.guide) {
       const c = tileCenter(game.guide.tile);

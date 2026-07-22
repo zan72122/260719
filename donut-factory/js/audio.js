@@ -128,6 +128,10 @@ const AudioSys = (() => {
     rain()     { noise(0.5, { filter: 'lowpass', freq: 900, vol: 0.18 }); tone(700, 0.4, { type: 'sine', slideTo: 400, vol: 0.1, delay: 0.1 }); },
     pokon()    { tone(240, 0.14, { type: 'sine', slideTo: 520, vol: 0.5 }); tone(520, 0.1, { type: 'sine', slideTo: 700, vol: 0.25, delay: 0.1 }); },
     zupon()    { tone(520, 0.16, { type: 'sine', slideTo: 160, vol: 0.45 }); noise(0.1, { filter: 'lowpass', freq: 900, vol: 0.2, delay: 0.06 }); },
+    boom()     { noise(0.5, { filter: 'lowpass', freq: 500, vol: 0.5 }); tone(120, 0.5, { type: 'sine', slideTo: 40, vol: 0.5 }); tone(70, 0.4, { type: 'square', vol: 0.2, delay: 0.03 }); },
+    thunder()  { noise(0.9, { filter: 'lowpass', freq: 350, vol: 0.55 }); tone(90, 0.8, { type: 'sawtooth', slideTo: 30, vol: 0.35 }); noise(0.4, { freq: 2500, vol: 0.2 }); },
+    slurp()    { tone(900, 0.4, { type: 'sine', slideTo: 120, vol: 0.35 }); noise(0.25, { filter: 'bandpass', freq: 700, vol: 0.2, delay: 0.1 }); },
+    ratchet()  { for (let i = 0; i < 4; i++) tone(300 + i * 60, 0.05, { type: 'square', vol: 0.14, delay: i * 0.07 }); },
   };
 
   function sfx(name, arg) {

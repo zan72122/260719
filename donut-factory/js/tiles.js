@@ -82,7 +82,11 @@ const TILE_DEFS = {
   box: {
     walkable: true,
     interactive: true,
-    onCenter(tile, donut, game) { game.collectDonut(donut, tile); return true; },
+    onCenter(tile, donut, game) {
+      if (donut.isVeggie) { game.spitDonut(donut, tile); return true; }   // やさいは「ぺっ」
+      game.collectDonut(donut, tile);
+      return true;
+    },
     exitFor(tile) { return tile.dir; },
     onTap(tile, game) {
       tile.pop = 1;
@@ -405,6 +409,224 @@ const TILE_DEFS = {
     update(tile, dt) {
       const target = tile.open ? 1 : 0;
       tile.armT += (target - tile.armT) * Math.min(1, dt * 10);
+    },
+  },
+  /* ---------------- のびちぢみプッシャー ---------------- */
+  pusher: {
+    walkable: false,
+    interactive: true,
+    onTap(tile, game) {
+      // すぐに1回のばす
+      const period = 4.2;
+      const ph = (tile.cycleT || 0) % period;
+      if (ph > 1.6) tile.cycleT += period - ph;
+      tile.pop = 1;
+      AudioSys.sfx('clunk');
+      game.noteTinker();
+    },
+    update(tile, dt, game) {
+      const flow = game.flow();
+      tile.cycleT = (tile.cycleT || 0) + dt * flow;
+      const ph = tile.cycleT % 4.2;
+      const MAXE = 2.2;   // 2マスさきのレーンに確実にとどく長さ
+      let ext = 0;
+      if (ph < 0.5) ext = easeOutCubic(ph / 0.5) * MAXE;
+      else if (ph < 0.85) ext = MAXE;
+      else if (ph < 1.6) ext = MAXE * (1 - easeOutCubic((ph - 0.85) / 0.75));
+      const prev = tile.ext || 0;
+      if (prev < MAXE - 0.1 && ext >= MAXE - 0.1) { AudioSys.sfx('clunk'); Render3D.shake(4); }
+      tile.ext = ext;
+      const c = tileCenter(tile);
+      const dx = DX[tile.dir], dy = DY[tile.dir];
+      const extending = ext > prev;
+      if (ext > 0.05 && extending) {
+        const tip = (0.5 + ext) * CELL;
+        for (const d of game.donuts) {
+          if (d.state !== 'belt' && d.state !== 'pushed') continue;
+          const rx = d.x - c.x, ry = d.y - c.y;
+          const along = rx * dx + ry * dy;
+          const perp = Math.abs(-rx * dy + ry * dx);
+          if (along > 0.3 * CELL && along < tip + 32 && perp < 46) {
+            if (d.state !== 'pushed') { d.sx = 1.25; d.sy = 0.75; AudioSys.sfx('boing'); }
+            d.state = 'pushed';
+            d.stateTime = 0;
+            d.aux = { srcTile: tile };
+            d.x = c.x + dx * (tip + 28);
+            d.y = c.y + dy * (tip + 28);
+            d.z = 0;
+          }
+        }
+      }
+      // ちぢみはじめたら、押していたドーナツをはなす
+      if (!extending || ext <= 0.05) {
+        for (const d of game.donuts) {
+          if (d.state === 'pushed' && d.aux.srcTile === tile) game.releasePushed(d);
+        }
+      }
+    },
+  },
+
+  /* ---------------- ロングアームクレーン ---------------- */
+  crane: {
+    walkable: false,
+    interactive: true,
+    onTap(tile, game) {
+      tile.pop = 1;
+      AudioSys.sfx('clunk');
+      game.noteTinker();
+    },
+    update(tile, dt, game) {
+      const flow = Math.max(0, game.flow());
+      if (!tile.craneState) { tile.craneState = 'idle'; tile.craneK = 0; tile.craneReach = CELL; tile.craneZ = 60; tile.cool = 1; }
+      const step = dt * flow;
+      const c = tileCenter(tile);
+      const dx = DX[tile.dir], dy = DY[tile.dir];
+      const d = tile.held;
+      const setDonut = (r, z) => {
+        if (!d) return;
+        d.x = c.x + dx * r;
+        d.y = c.y + dy * r;
+        d.z = z;
+      };
+      switch (tile.craneState) {
+        case 'idle': {
+          tile.cool -= step;
+          tile.craneReach += (CELL - tile.craneReach) * Math.min(1, dt * 4);
+          tile.craneZ = 60 + Math.sin(game.time * 2 + tile.x) * 8;
+          if (tile.cool <= 0) {
+            const px = tile.x + dx, py = tile.y + dy;
+            const cand = game.donuts.find(dd =>
+              dd.state === 'belt' && dd.tx === px && dd.ty === py && Math.abs(dd.t - 0.5) < 0.28);
+            if (cand) {
+              tile.held = cand;
+              cand.state = 'craned';
+              cand.stateTime = 0;
+              cand.aux = { srcTile: tile };
+              tile.craneState = 'lift';
+              tile.craneK = 0;
+              AudioSys.sfx('clunk');
+            }
+          }
+          break;
+        }
+        case 'lift':
+          tile.craneK += step / 0.35;
+          setDonut(CELL, Math.min(1, tile.craneK) * 95);
+          tile.craneReach = CELL;
+          tile.craneZ = Math.min(1, tile.craneK) * 95;
+          if (tile.craneK >= 1) { tile.craneState = 'swing'; tile.craneK = 0; AudioSys.sfx('whoosh'); }
+          break;
+        case 'swing': {
+          tile.craneK += step / 0.7;
+          const k = Math.min(1, tile.craneK);
+          const r = lerp(CELL, 3 * CELL, easeOutCubic(k));
+          setDonut(r, 95 + Math.sin(k * Math.PI) * 25);
+          tile.craneReach = r;
+          tile.craneZ = 95;
+          if (tile.craneK >= 1) { tile.craneState = 'lower'; tile.craneK = 0; }
+          break;
+        }
+        case 'lower': {
+          tile.craneK += step / 0.3;
+          const k = Math.min(1, tile.craneK);
+          setDonut(3 * CELL, 95 * (1 - k));
+          tile.craneReach = 3 * CELL;
+          tile.craneZ = 95 * (1 - k);
+          if (tile.craneK >= 1) {
+            if (d) game.releaseCraned(d, tile.x + dx * 3, tile.y + dy * 3);
+            tile.held = null;
+            tile.craneState = 'idle';
+            tile.cool = 1.4;
+            AudioSys.sfx('plop');
+          }
+          break;
+        }
+      }
+      // つかんでいたドーナツが消えたらリセット
+      if (tile.held && (tile.held.dead || tile.held.state !== 'craned')) {
+        tile.held = null;
+        tile.craneState = 'idle';
+        tile.cool = 1;
+      }
+    },
+  },
+
+  /* ---------------- ブラックホール ---------------- */
+  hole: {
+    walkable: true,
+    interactive: true,
+    exitFor(tile) { return tile.dir; },
+    onCenter(tile, donut, game) {
+      tile.cool = tile.cool || 0;
+      if (tile.cool > 0) return false;      // クールダウン中はそのまま通過
+      tile.cool = 1.4;
+      tile.pop = 1;
+      game.suckDonut(donut, tile);
+      return true;
+    },
+    onTap(tile, game) {
+      tile.pop = 1;
+      AudioSys.sfx('slurp');
+      const c = tileCenter(tile);
+      Particles.sparkle(c.x, c.y, 10, '#b78cff');
+      game.noteTinker();
+    },
+    update(tile, dt) { tile.cool = Math.max(0, (tile.cool || 0) - dt); },
+  },
+
+  /* ---------------- 大砲 ---------------- */
+  cannon: {
+    walkable: true,
+    interactive: true,
+    exitFor(tile) { return tile.dir; },
+    onCenter(tile, donut, game) {
+      game.loadCannon(donut, tile);
+      return true;
+    },
+    onTap(tile, game) {
+      tile.pop = 1;
+      AudioSys.sfx('clunk');
+      game.noteTinker();
+    },
+    update(tile, dt) {
+      tile.chargeT = Math.max(0, (tile.chargeT || 0) - dt);
+      tile.fireT = Math.max(0, (tile.fireT || 0) - dt * 2.2);
+    },
+  },
+
+  /* ---------------- ドミノスイッチ ---------------- */
+  domino: {
+    walkable: false,
+    interactive: true,
+    priorityGuide: true,
+    onTap(tile, game) {
+      tile.pop = 1;
+      game.startDominoWave(tile);
+      game.noteTinker();
+    },
+  },
+
+  /* ---------------- やさいスイッチ ---------------- */
+  veggie: {
+    walkable: false,
+    interactive: true,
+    priorityGuide: true,
+    onTap(tile, game) {
+      tile.pop = 1;
+      game.toggleVeggie();
+      game.noteTinker();
+    },
+  },
+
+  /* ---------------- こうじょう反転レバー ---------------- */
+  flip: {
+    walkable: false,
+    interactive: true,
+    priorityGuide: true,
+    onTap(tile, game) {
+      tile.pop = 1;
+      game.flipBoard();
+      game.noteTinker();
     },
   },
 };

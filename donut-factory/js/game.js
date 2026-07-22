@@ -31,10 +31,22 @@ const Game = {
   event: null,
   eventTimer: 75,
   orderBoost: 1,
+  // かみなり雲・スタン
+  cloud: null,
+  cloudTimer: 50,
+  stunT: 0,
+  // やさいモード・ドミノ波・反転
+  veggie: false,
+  dominoWave: null,
+  flipCooldown: 0,
+  rainButtonCd: 0,
+  skyfallQueue: 0,
+  skyfallT: 0,
 };
 
-// 全体の流れ係数（ターボ × イベント効果）。停電=0、あめ=1.6倍
+// 全体の流れ係数（ターボ × イベント効果）。停電・かみなり=0、あめ=1.6倍
 Game.flow = function () {
+  if (Game.stunT > 0) return 0;
   let m = 1;
   if (Game.event) {
     if (Game.event.type === 'blackout') m = 0;
@@ -74,6 +86,13 @@ function loadLevel(index) {
   Game.event = null;
   Game.orderBoost = 1;
   Game.eventTimer = rand(60, 100);
+  Game.cloud = null;
+  Game.cloudTimer = rand(45, 80);
+  Game.stunT = 0;
+  Game.veggie = false;
+  Game.dominoWave = null;
+  Game.skyfallQueue = 0;
+  Game.flipCooldown = 0;
   hideBanner();
 
   for (let y = 0; y < Game.rows; y++) {
@@ -167,6 +186,9 @@ function placeUserTile(tx, ty) {
     case 'froster':   spec = { type: 'froster', color: pick(FROST_CYCLE) }; break;
     case 'sprinkler': spec = { type: 'sprinkler', style: pick(SPRINKLE_CYCLE) }; break;
     case 'jump':      spec = { type: 'jump' }; break;
+    case 'pusher':    spec = { type: 'pusher' }; break;
+    case 'hole':      spec = { type: 'hole' }; break;
+    case 'cannon':    spec = { type: 'cannon' }; break;
     default:          spec = { type: 'belt' };
   }
   spec.dir = smartDir(tx, ty);
@@ -193,9 +215,13 @@ function removeUserTile(tile) {
   if (i >= 0) Game.tileList.splice(i, 1);
   Game.userTileCount = Math.max(0, Game.userTileCount - 1);
   Render3D.removeTileView(tile);
-  // うえにいたドーナツはころがりおちる
+  // うえにいたドーナツ・装置につかまれていたドーナツはころがりおちる
   for (const d of Game.donuts) {
     if (d.state === 'belt' && d.tx === tile.x && d.ty === tile.y) startFall(d, d.exitDir);
+    if ((d.state === 'pushed' || d.state === 'craned' || d.state === 'loaded') && d.aux && d.aux.srcTile === tile) {
+      d.hidden = false;
+      startFall(d, randInt(0, 3));
+    }
   }
   const c = tileCenter(tile);
   AudioSys.sfx('zupon');
@@ -256,6 +282,108 @@ function updateEvents(dt) {
     Game.eventTimer -= dt;
     if (Game.eventTimer <= 0) startEvent(pick(['rain', 'blackout', 'order']));
   }
+
+  // かみなり雲（ふらふら漂う。タップすると落雷）
+  if (Game.cloud) {
+    const cl = Game.cloud;
+    cl.t += dt;
+    cl.x += cl.vx * dt;
+    cl.y += cl.vy * dt;
+    const bw = Game.cols * CELL, bh = Game.rows * CELL;
+    if (cl.x < 70 || cl.x > bw - 70) cl.vx *= -1;
+    if (cl.y < 70 || cl.y > bh - 70) cl.vy *= -1;
+    if (cl.t > 24) { Game.cloud = null; Game.cloudTimer = rand(55, 95); }
+  } else {
+    Game.cloudTimer -= dt;
+    if (Game.cloudTimer <= 0 && !Game.event) {
+      Game.cloud = {
+        x: rand(120, Game.cols * CELL - 120),
+        y: rand(120, Game.rows * CELL - 120),
+        vx: rand(-26, 26), vy: rand(-18, 18), t: 0,
+      };
+      showBanner('⛈️', 'かみなりぐもだ！ タップしてみて！', 3400);
+      AudioSys.sfx('rain');
+    }
+  }
+
+  // かみなりのビリビリ（スタン）
+  if (Game.stunT > 0) {
+    Game.stunT -= dt;
+    Game.sparkT = (Game.sparkT || 0) - dt;
+    if (Game.sparkT <= 0) {
+      Game.sparkT = 0.14;
+      const ds = Game.donuts.filter(d => d.state === 'belt');
+      if (ds.length) {
+        const d = pick(ds);
+        Particles.sparkle(d.x, d.y, 4, '#fff06a');
+      }
+    }
+    if (Game.stunT <= 0) { AudioSys.sfx('zap'); AudioSys.sfx('slide'); }
+  }
+
+  // ドミノ波（ベルトが1枚ずつパタパタ）
+  if (Game.dominoWave) {
+    const w = Game.dominoWave;
+    w.t += dt;
+    while (w.idx < w.list.length && w.t >= w.idx * w.interval) {
+      const bt = w.list[w.idx].tile;
+      if (bt.type === 'belt' && Game.tiles[bt.y] && Game.tiles[bt.y][bt.x] === bt) {
+        bt.dir = rotateCW(bt.dir);
+        bt.rotAnim = 1;
+        bt.pop = 0.5;
+        if (w.idx % 3 === 0) AudioSys.sfx('tick');
+      }
+      w.idx++;
+    }
+    if (w.idx >= w.list.length) Game.dominoWave = null;
+  }
+
+  // ドーナツのあめ
+  Game.rainButtonCd = Math.max(0, Game.rainButtonCd - dt);
+  if (Game.skyfallQueue > 0) {
+    Game.skyfallT -= dt;
+    if (Game.skyfallT <= 0) {
+      Game.skyfallT = 0.07;
+      Game.skyfallQueue--;
+      if (Game.donuts.length < DONUT_CAP) {
+        const tx = randInt(0, Game.cols - 1), ty = randInt(0, Game.rows - 1);
+        const d = new Donut(tx, ty, DIR_E);
+        d.state = 'skyfall';
+        d.x = (tx + 0.5) * CELL + rand(-28, 28);
+        d.y = (ty + 0.5) * CELL + rand(-28, 28);
+        d.z = rand(380, 560);
+        d.sx = d.sy = 1;
+        d.centerFired = true;
+        d.isVeggie = Game.veggie;
+        d.aux = { vz: 0 };
+        Game.donuts.push(d);
+      }
+    }
+  }
+
+  Game.flipCooldown = Math.max(0, Game.flipCooldown - dt);
+}
+
+// らくらい！
+function strikeLightning() {
+  const cl = Game.cloud;
+  Game.cloud = null;
+  Game.cloudTimer = rand(60, 100);
+  Game.stunT = 3;
+  AudioSys.sfx('thunder');
+  Render3D.shake(16);
+  Render3D.flash(cl.x, cl.y, '#ffffff', 340);
+  Render3D.flash(cl.x, cl.y, '#fff06a', 210);
+  for (let i = 0; i < 12; i++) {
+    Particles.spawn({
+      kind: 'sparkle',
+      x: cl.x + rand(-14, 14), z: cl.y + rand(-14, 14),
+      h: 235 - i * 18,
+      vx: rand(-30, 30), vz: rand(-30, 30), vh: -rand(60, 150), g: 0,
+      maxLife: 0.4, size: 12, color: '#fff06a',
+    });
+  }
+  showBanner('⚡', 'ビリビリ〜！！', 2600);
 }
 
 let _bannerTimer = null;
@@ -285,6 +413,7 @@ Game.spawnFromSpawner = function (tile, manual) {
   }
   const d = new Donut(tile.x, tile.y, tile.dir);
   d.centerFired = true;
+  d.isVeggie = Game.veggie;
   Game.donuts.push(d);
   const c = tileCenter(tile);
   if (manual) {
@@ -332,6 +461,7 @@ Game.cloneDonut = function (donut, tile) {
   const d = new Donut(tile.x, tile.y, tile.side);
   d.centerFired = true;
   d.copyDecorFrom(donut);
+  d.isVeggie = donut.isVeggie;
   Game.donuts.push(d);
   AudioSys.sfx('bigPop');
   Particles.sparkle(c.x, c.y, 10, '#aef2ae');
@@ -378,6 +508,173 @@ function startFall(donut, dir) {
   donut.aux = { dir: dir !== undefined ? dir : donut.exitDir };
   AudioSys.sfx('fallWhistle');
 }
+
+/* ============================================================
+ * 新しい装置のドーナツ操作（段階3）
+ * ============================================================ */
+
+// 大砲: つめて → ドーン！
+Game.loadCannon = function (donut, tile) {
+  donut.state = 'loaded';
+  donut.stateTime = 0;
+  donut.hidden = true;
+  donut.aux = { srcTile: tile };
+  tile.chargeT = 1;
+  AudioSys.sfx('ratchet');
+};
+
+// ブラックホール: 吸い込まれて、ゴールのそばからこっそり出てくる
+Game.suckDonut = function (donut, tile) {
+  const c = tileCenter(tile);
+  donut.state = 'sucked';
+  donut.stateTime = 0;
+  donut.aux = { cx: c.x, cy: c.y, r0: Math.max(20, Math.hypot(donut.x - c.x, donut.y - c.y) + 24), a0: Math.atan2(donut.y - c.y, donut.x - c.x) };
+  AudioSys.sfx('slurp');
+  Particles.sparkle(c.x, c.y, 8, '#b78cff');
+};
+
+// やさいを「ぺっ」と吐き出す
+Game.spitDonut = function (donut, tile) {
+  const back = oppositeDir(donut.entryDir);
+  const c = tileCenter(tile);
+  donut.state = 'spit';
+  donut.stateTime = 0;
+  donut.aux = {
+    sx: c.x, sy: c.y,
+    ex: c.x + DX[back] * CELL, ey: c.y + DY[back] * CELL,
+    ltx: tile.x + DX[back], lty: tile.y + DY[back],
+  };
+  tile.pop = 1;
+  AudioSys.sfx('zupon');
+  AudioSys.sfx('giggle');
+  Particles.puff(c.x, c.y, 4, '#d8f0c8');
+};
+
+// プッシャーからの解放
+Game.releasePushed = function (donut) {
+  const tx = Math.floor(donut.x / CELL), ty = Math.floor(donut.y / CELL);
+  const tile = tileAt(tx, ty);
+  if (tile && TILE_DEFS[tile.type].walkable) {
+    donut.state = 'belt';
+    donut.tx = tx; donut.ty = ty;
+    donut.t = 0.5;
+    donut.entryDir = tile.dir;
+    donut.exitDir = tile.dir;
+    donut.centerFired = false;
+  } else {
+    startFall(donut, randInt(0, 3));
+  }
+};
+
+// クレーンからの解放
+Game.releaseCraned = function (donut, tx, ty) {
+  const tile = tileAt(tx, ty);
+  if (tile && TILE_DEFS[tile.type].walkable) {
+    donut.state = 'belt';
+    donut.tx = tx; donut.ty = ty;
+    donut.t = 0.5;
+    donut.entryDir = tile.dir;
+    donut.exitDir = tile.dir;
+    donut.centerFired = false;
+    donut.z = 0;
+    donut.sx = 1.2; donut.sy = 0.8;
+  } else {
+    startFall(donut, randInt(0, 3));
+  }
+};
+
+// ドミノスイッチ: ベルトが1枚ずつパタパタ回る
+Game.startDominoWave = function (tile) {
+  if (Game.dominoWave) return;
+  const belts = Game.tileList
+    .filter(t => t.type === 'belt')
+    .map(t => ({ tile: t, dist: Math.abs(t.x - tile.x) + Math.abs(t.y - tile.y) }))
+    .sort((a, b) => a.dist - b.dist);
+  if (!belts.length) return;
+  Game.dominoWave = { list: belts, idx: 0, t: 0, interval: 0.09 };
+  AudioSys.sfx('ratchet');
+  Render3D.shake(3);
+};
+
+// やさいスイッチ
+Game.toggleVeggie = function () {
+  Game.veggie = !Game.veggie;
+  for (const d of Game.donuts) {
+    d.isVeggie = Game.veggie;
+    d.decorRev++;
+    if (d.state === 'belt') Particles.puff(d.x, d.y, 2, Game.veggie ? '#bfe8a8' : '#ffd7e8');
+  }
+  AudioSys.sfx(Game.veggie ? 'boing' : 'pokon');
+  AudioSys.sfx('spin');
+  showBanner(Game.veggie ? '🥦' : '🍩', Game.veggie ? 'ぜんぶ やさいに なっちゃった！' : 'ドーナツに もどった！', 2800);
+  Render3D.punch(0.35);
+};
+
+// こうじょう反転レバー
+Game.flipBoard = function () {
+  if (Game.flipCooldown > 0) return;
+  Game.flipCooldown = 3;
+  const cols = Game.cols, rows = Game.rows;
+  // 途中状態のドーナツはポンっと消す
+  Game.donuts = Game.donuts.filter(d => {
+    if (d.state === 'belt' || d.state === 'carried') return true;
+    Particles.sparkle(d.x, d.y, 6, '#ffffff');
+    return false;
+  });
+  // 位置は点対称、向きはそのまま。
+  // （位置の反転 + スタート/ゴール役割の入替で、流れは自然に逆転する）
+  for (const t of Game.tileList) {
+    t.x = cols - 1 - t.x;
+    t.y = rows - 1 - t.y;
+    if (t.type === 'spawner') {
+      t.type = 'box'; t.count = 0; t.shipT = 0;
+    } else if (t.type === 'box') {
+      t.type = 'spawner'; t.timer = 1;
+    }
+    t.held = null; t.craneState = null;
+  }
+  Game.tiles = Array.from({ length: rows }, () => Array(cols).fill(null));
+  for (const t of Game.tileList) Game.tiles[t.y][t.x] = t;
+  // 新スポナー（もとゴール）の向き: 流れ出せる方向へ
+  for (const t of Game.tileList) {
+    if (t.type !== 'spawner') continue;
+    let best = -1;
+    for (let d2 = 0; d2 < 4; d2++) {
+      const nt = tileAt(t.x + DX[d2], t.y + DY[d2]);
+      if (nt && TILE_DEFS[nt.type].walkable) {
+        if (best < 0) best = d2;
+        if (nt.dir === d2) { best = d2; break; }
+      }
+    }
+    if (best >= 0) t.dir = best;
+  }
+  // ドーナツも点対称の位置へ（マス中央にスナップして流れ直す）
+  const bw = cols * CELL, bh = rows * CELL;
+  for (const d of Game.donuts) {
+    d.tx = cols - 1 - d.tx;
+    d.ty = rows - 1 - d.ty;
+    const under = tileAt(d.tx, d.ty);
+    if (under && TILE_DEFS[under.type].walkable && d.state === 'belt') {
+      d.t = 0.5;
+      d.entryDir = under.dir;
+      d.exitDir = under.dir;
+      d.centerFired = true;
+      donutWorldPos(d);
+    } else {
+      d.x = bw - d.x;
+      d.y = bh - d.y;
+      if (d.state === 'belt') startFall(d, randInt(0, 3));
+    }
+  }
+  Render3D.buildLevel(Game);
+  Render3D.punch(0.8);
+  Render3D.shake(10);
+  Render3D.flash(bw / 2, bh / 2, '#ffffff', 320);
+  for (let i = 0; i < 4; i++) Particles.confetti(rand(0, bw), rand(0, bh), 10);
+  AudioSys.sfx('spin');
+  AudioSys.sfx('fanfare');
+  showBanner('🙃', 'こうじょう はんてん！', 3000);
+};
 
 /* ============================================================
  * シミュレーション
@@ -516,8 +813,8 @@ function updateDonuts(dt) {
         const k = Math.min(1, d.stateTime / a.dur);
         d.x = lerp(a.sx, a.ex, k);
         d.y = lerp(a.sy, a.ey, k);
-        d.z = 100 * 4 * k * (1 - k);
-        d.spin = k * TAU;
+        d.z = (a.h || 100) * 4 * k * (1 - k);
+        d.spin = k * TAU * (a.h > 150 ? 2 : 1);
         if (k >= 1) {
           d.spin = 0;
           d.z = 0;
@@ -525,6 +822,7 @@ function updateDonuts(dt) {
           AudioSys.sfx('plop');
           d.sx = 1.25; d.sy = 0.75;   // 着地スカッシュ
           Particles.crumbs(d.x, d.y, 3);
+          if (a.h > 150) { Render3D.shake(6); Particles.puff(d.x, d.y, 5, '#e8e0d8'); }   // 大砲の着弾
           if (nt && TILE_DEFS[nt.type].walkable) {
             d.state = 'belt';
             d.tx = a.ltx; d.ty = a.lty;
@@ -604,6 +902,128 @@ function updateDonuts(dt) {
       case 'carried':
         d.z += (52 - d.z) * Math.min(1, dt * 12);
         break;
+
+      case 'loaded': {   // 大砲のなかでチャージ
+        d.stateTime += dt * Math.max(0.0001, Game.flow());
+        if (d.stateTime >= 0.62) {
+          const tile = d.aux.srcTile;
+          const dir = tile.dir;
+          const c = tileCenter(tile);
+          d.hidden = false;
+          d.state = 'jump';
+          d.stateTime = 0;
+          d.aux = {
+            sx: c.x, sy: c.y,
+            ex: c.x + DX[dir] * 4 * CELL, ey: c.y + DY[dir] * 4 * CELL,
+            ltx: tile.x + DX[dir] * 4, lty: tile.y + DY[dir] * 4,
+            dir, dur: 0.8, h: 190,
+          };
+          tile.fireT = 1;
+          tile.pop = 1;
+          AudioSys.sfx('boom');
+          Render3D.shake(12);
+          Render3D.flash(c.x + DX[dir] * 40, c.y + DY[dir] * 40, '#fff0c0', 190);
+          Particles.puff(c.x + DX[dir] * 55, c.y + DY[dir] * 55, 8, '#e8e0d8');
+        }
+        break;
+      }
+
+      case 'sucked': {   // ブラックホールにうずまき吸引
+        d.stateTime += dt;
+        const k = Math.min(1, d.stateTime / 0.55);
+        const a = d.aux;
+        const r = a.r0 * (1 - k);
+        const ang = a.a0 + k * 9;
+        d.x = a.cx + Math.cos(ang) * r;
+        d.y = a.cy + Math.sin(ang) * r;
+        d.spin = ang;
+        d.sx = d.sy = Math.max(0.03, (1 - k) * d.targetS);
+        if (k >= 1) {
+          const boxes = Game.tileList.filter(t => t.type === 'box');
+          if (!boxes.length) { d.dead = true; break; }
+          const box = pick(boxes);
+          let feed = null, fdir = box.dir;
+          for (let dd = 0; dd < 4; dd++) {
+            const nt = tileAt(box.x + DX[dd], box.y + DY[dd]);
+            if (nt && TILE_DEFS[nt.type].walkable && nt.dir === oppositeDir(dd)) {
+              feed = nt; fdir = oppositeDir(dd); break;
+            }
+          }
+          if (feed) { d.tx = feed.x; d.ty = feed.y; } else { d.tx = box.x; d.ty = box.y; }
+          d.exitDir = fdir;
+          d.entryDir = fdir;
+          d.t = 0.5;
+          d.centerFired = false;
+          d.state = 'teleIn';
+          d.stateTime = 0;
+          d.spin = 0;
+          donutWorldPos(d);
+          Particles.puff(d.x, d.y, 3, '#d8c8f8');
+          AudioSys.sfx('whoosh');
+        }
+        break;
+      }
+
+      case 'spit': {   // 「ぺっ」とはきだされる
+        d.stateTime += dt;
+        const k = Math.min(1, d.stateTime / 0.5);
+        const a = d.aux;
+        d.x = lerp(a.sx, a.ex, k);
+        d.y = lerp(a.sy, a.ey, k);
+        d.z = Math.sin(k * Math.PI) * 80;
+        d.spin += dt * 10;
+        if (k >= 1) {
+          d.spin = 0; d.z = 0;
+          const tile = tileAt(a.ltx, a.lty);
+          if (tile && TILE_DEFS[tile.type].walkable) {
+            d.state = 'belt';
+            d.tx = a.ltx; d.ty = a.lty;
+            d.t = 0.5;
+            d.entryDir = tile.dir;
+            d.exitDir = tile.dir;
+            d.centerFired = true;
+            d.sx = 1.2; d.sy = 0.8;
+            AudioSys.sfx('plop');
+          } else {
+            startFall(d, randInt(0, 3));
+          }
+        }
+        break;
+      }
+
+      case 'skyfall': {   // ドーナツのあめ
+        const a = d.aux;
+        a.vz += 1000 * dt;
+        d.z -= a.vz * dt;
+        d.spin += dt * 5;
+        if (d.z <= 0) {
+          d.z = 0; d.spin = 0;
+          const tx2 = Math.floor(d.x / CELL), ty2 = Math.floor(d.y / CELL);
+          const tile = tileAt(tx2, ty2);
+          d.sx = 1.3; d.sy = 0.7;
+          AudioSys.sfx('plop');
+          Particles.crumbs(d.x, d.y, 3);
+          if (tile && TILE_DEFS[tile.type].walkable) {
+            d.state = 'belt';
+            d.tx = tx2; d.ty = ty2;
+            d.t = 0.5;
+            d.entryDir = tile.dir;
+            d.exitDir = tile.dir;
+            d.centerFired = false;
+          } else {
+            d.state = 'fall';
+            d.stateTime = 0.35;
+            d.aux = { dir: randInt(0, 3) };
+          }
+        }
+        break;
+      }
+
+      case 'pushed':
+      case 'craned':
+        d.stateTime += dt;
+        if (d.stateTime > 7) startFall(d, randInt(0, 3));   // 保険
+        break;
     }
   }
 
@@ -661,6 +1081,13 @@ function onPointerDown(e) {
     Render3D.flash(w.x, w.y, '#fff6b8', 160);
     Particles.sparkle(w.x, w.y, 8, '#fff6b8');
     if (ev.data.taps >= 3) endEvent();
+    Game.pointers.set(e.pointerId, { kind: 'tap' });
+    return;
+  }
+
+  // 0.5) かみなりぐもをタップ → らくらい！
+  if (Game.cloud && dist2(w.x, w.y, Game.cloud.x, Game.cloud.y) < 90 * 90) {
+    strikeLightning();
     Game.pointers.set(e.pointerId, { kind: 'tap' });
     return;
   }
@@ -808,6 +1235,20 @@ function setupHUD() {
     Game.speed = Game.speed === 1 ? 2.1 : 1;
     btnTurbo.textContent = Game.speed === 1 ? '🐢' : '🐇';
     AudioSys.sfx(Game.speed === 1 ? 'clunk' : 'slide');
+    Game.noteTinker();
+  });
+
+  // ドーナツのあめボタン
+  const btnDonutRain = document.getElementById('btn-donutrain');
+  btnDonutRain.addEventListener('click', () => {
+    AudioSys.ensure();
+    if (Game.rainButtonCd > 0) return;
+    Game.rainButtonCd = 7;
+    Game.skyfallQueue = 20;
+    Game.skyfallT = 0;
+    AudioSys.sfx('fallWhistle');
+    AudioSys.sfx('slide');
+    showBanner('🍩', 'ドーナツの あめ〜！', 2600);
     Game.noteTinker();
   });
 

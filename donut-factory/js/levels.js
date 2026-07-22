@@ -257,4 +257,34 @@ const LEVELS = [
       q: { type: 'tele', pair: 0, dir: 'E' },
     },
   },
+
+  {
+    id: 'surprise',
+    name: 'どっきり こうじょう',
+    emoji: '🎁',
+    spawnEvery: 2.2,
+    theme: { floorA: '#f3e8ff', floorB: '#e6f6e6', bg: '#e5d2f2' },
+    music: { seed: 141, key: 4, tempo: 94 },
+    map: [
+      '..........',
+      's>>N...>>v',
+      '..P......v',
+      'b<<<<H<<<<',
+      '.......C..',
+      'e<<<<<<<..',
+      '.D...V..F.',
+    ],
+    legend: {
+      s: { type: 'spawner', dir: 'E' },
+      b: { type: 'box' },
+      e: { type: 'box' },
+      N: { type: 'cannon', dir: 'E' },     // ドーン！と4マス先へ発射
+      P: { type: 'pusher', dir: 'S' },     // 3マスのびてドーナツを下のレーンへ
+      H: { type: 'hole', dir: 'W' },       // ブラックホール（ゴールのそばへワープ）
+      C: { type: 'crane', dir: 'N' },      // 下のレーンから上のレーンへ運ぶ
+      D: { type: 'domino' },               // ベルトがぜんぶパタパタ回る
+      V: { type: 'veggie' },               // ぜんぶやさいに！
+      F: { type: 'flip' },                 // こうじょう反転レバー
+    },
+  },
 ];

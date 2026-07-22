@@ -1004,6 +1004,292 @@
     };
   };
 
+  /* ---------------- のびちぢみプッシャー ---------------- */
+  BUILDERS.pusher = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#ffe3d0'));
+    const laneG = new T.Group();
+    laneG.rotation.y = yawOf(tile.dir);
+    g.add(laneG);
+    // ハウジング（しましま注意カラー）
+    const stripeTex = makeStripeTexture();
+    const stripeM = new T.MeshToonMaterial({ map: stripeTex, gradientMap: I.gradientTex });
+    gc(stripeM, stripeTex);
+    const housing = mkBox(56, 44, 60, '#ff9d6e', true);
+    housing.position.set(-6, 26, 0);
+    laneG.add(housing);
+    const stripeBar = new T.Mesh(cachedGeo('pushStripe', () => new T.BoxGeometry(58, 8, 62)), stripeM);
+    stripeBar.position.set(-6, 44, 0);
+    laneG.add(stripeBar);
+    addGear(view, laneG, 8, 10, '#e8814a', 4.2, { x: -6, y: 26, z: 34, depth: 5 });
+    // のびる3段アーム + 先端プレート
+    const segs = [];
+    const segCols = ['#d98a5e', '#e8a06e', '#f4b684'];
+    for (let i = 0; i < 3; i++) {
+      const seg = new T.Mesh(cachedGeo(`pushSeg${i}`, () => new T.BoxGeometry(CELL, 20 - i * 3, 52 - i * 12)), mat(segCols[i]));
+      seg.castShadow = true;
+      laneG.add(seg);
+      segs.push(seg);
+    }
+    const plate = mkBox(12, 34, LANE_W + 6, '#ff9d6e', true);
+    laneG.add(plate);
+    view.update = () => {
+      laneG.rotation.y = yawOf(tile.dir);
+      const ext = tile.ext || 0;
+      let start = 22;
+      for (let i = 0; i < 3; i++) {
+        const len = clamp(ext - i, 0, 1) * CELL;
+        segs[i].visible = len > 2;
+        segs[i].scale.x = Math.max(0.02, len / CELL);
+        segs[i].position.set(start + len / 2, 26, 0);
+        start += len;
+      }
+      plate.position.set(22 + ext * CELL + 7, 26, 0);
+    };
+  };
+
+  /* ---------------- ロングアームクレーン ---------------- */
+  BUILDERS.crane = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#e8ecf8'));
+    const laneG = new T.Group();
+    laneG.rotation.y = yawOf(tile.dir);
+    g.add(laneG);
+    // タワー + キャビン
+    const tower = mkBox(20, 112, 20, '#8fa3d8', true);
+    tower.position.y = 56;
+    laneG.add(tower);
+    const cab = mkBox(30, 22, 26, '#ffd94d', true);
+    cab.position.set(4, 118, 0);
+    laneG.add(cab);
+    addGear(view, laneG, 9, 12, '#6f83bc', 2.2, { flat: true, x: 0, y: 10, z: 0, depth: 5 });
+    // のびるジブ + ケーブル + クロー
+    const jib = new T.Mesh(cachedGeo('craneJib', () => new T.BoxGeometry(CELL, 12, 14)), mat('#a9b8e8'));
+    jib.castShadow = true;
+    laneG.add(jib);
+    const cable = new T.Mesh(cachedGeo('craneCable', () => new T.CylinderGeometry(1.8, 1.8, 1, 6)), mat('#6b6478'));
+    laneG.add(cable);
+    const claw = new T.Group();
+    for (const s of [-1, 1]) {
+      const finger = mkBox(4, 14, 4, METAL);
+      finger.position.set(s * 9, -4, 0);
+      finger.rotation.z = s * 0.35;
+      claw.add(finger);
+    }
+    const clawHub = mkSphere(6, '#ffd94d', 8, true);
+    claw.add(clawHub);
+    laneG.add(claw);
+    view.update = () => {
+      laneG.rotation.y = yawOf(tile.dir);
+      const reach = tile.craneReach || CELL;
+      const zTop = 112;
+      const clawY = (tile.craneZ || 60) + 44;
+      jib.scale.x = (reach + 50) / CELL;
+      jib.position.set((reach + 50) / 2 - 10, zTop, 0);
+      const len = Math.max(4, zTop - clawY);
+      cable.scale.y = len;
+      cable.position.set(reach, zTop - len / 2, 0);
+      claw.position.set(reach, clawY, 0);
+    };
+  };
+
+  /* ---------------- ブラックホール ---------------- */
+  BUILDERS.hole = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#d8cfe8'));
+    const lane = makeLane(view, true);
+    lane.rotation.y = yawOf(tile.dir);
+    g.add(lane);
+    // 渦
+    const disc = mkCyl(34, 36, 4, '#3a3050', 20, true);
+    disc.position.y = BELT_TOP + 3;
+    g.add(disc);
+    const core = new T.Mesh(cachedGeo('holeCore', () => new T.CylinderGeometry(17, 17, 5, 16)), new T.MeshBasicMaterial({ color: 0x120e20 }));
+    core.position.y = BELT_TOP + 4;
+    g.add(core);
+    const rg = cachedGeo('holeSwirl', () => new T.TorusGeometry(26, 3, 6, 24, TAU * 0.7).rotateX(Math.PI / 2));
+    const sw1 = new T.Mesh(rg, mat('#b78cff'));
+    sw1.position.y = BELT_TOP + 6;
+    g.add(sw1);
+    view.spinners.push({ obj: sw1, axis: 'y', speed: -5 });
+    const sw2 = new T.Mesh(rg, mat('#8c5fd8'));
+    sw2.position.y = BELT_TOP + 8;
+    sw2.scale.set(0.6, 1, 0.6);
+    g.add(sw2);
+    view.spinners.push({ obj: sw2, axis: 'y', speed: -7.5 });
+    const c = tileCenter(tile);
+    let inT = 0;
+    view.update = (dt, time, game) => {
+      lane.rotation.y = yawOf(tile.dir);
+      // まわりのきらきらが吸い込まれる
+      inT -= dt;
+      if (inT <= 0) {
+        inT = 0.18;
+        const a = rand(0, TAU);
+        Particles.spawn({
+          kind: 'sparkle',
+          x: c.x + Math.cos(a) * 55, z: c.y + Math.sin(a) * 55,
+          h: 26, vx: -Math.cos(a) * 130, vz: -Math.sin(a) * 130, vh: 0, g: 0,
+          maxLife: 0.4, size: 8, color: '#b78cff',
+        });
+      }
+      const k = 1 + Math.sin(time * 5) * 0.05 + (tile.cool > 1 ? 0.3 : 0);
+      disc.scale.set(k, 1, k);
+    };
+  };
+
+  /* ---------------- 大砲 ---------------- */
+  BUILDERS.cannon = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#e0d8cc'));
+    const lane = makeLane(view, true);
+    lane.rotation.y = yawOf(tile.dir);
+    g.add(lane);
+    const laneG = new T.Group();
+    laneG.rotation.y = yawOf(tile.dir);
+    g.add(laneG);
+    // 車輪つきの台座
+    for (const s of [-1, 1]) {
+      const wheel = mkCyl(13, 13, 7, '#6b6478', 12, true);
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(-8, 14, s * 32);
+      laneG.add(wheel);
+      const mount = mkBox(30, 26, 8, '#8a6a4a', true);
+      mount.position.set(-4, 28, s * 24);
+      laneG.add(mount);
+    }
+    // 砲身（ななめ上向き）
+    const barrelG = new T.Group();
+    barrelG.position.set(-6, 36, 0);
+    const barrel = new T.Mesh(cachedGeo('barrel', () => {
+      const geo = new T.CylinderGeometry(11, 15, 74, 12);
+      geo.rotateZ(-Math.PI / 2);
+      geo.translate(30, 0, 0);
+      return geo;
+    }), mat('#5a5a6e'));
+    barrel.castShadow = true;
+    barrelG.add(barrel);
+    const muzzle = new T.Mesh(cachedGeo('muzzle', () => {
+      const geo = new T.TorusGeometry(12, 3.5, 8, 14);
+      geo.rotateY(Math.PI / 2);
+      return geo;
+    }), mat('#ffd94d'));
+    muzzle.position.set(67, 0, 0);
+    barrelG.add(muzzle);
+    laneG.add(barrelG);
+    view.update = (dt, time) => {
+      lane.rotation.y = yawOf(tile.dir);
+      laneG.rotation.y = yawOf(tile.dir);
+      const charge = tile.chargeT || 0, fire = tile.fireT || 0;
+      // チャージでガタガタ、発射で反動
+      barrelG.rotation.z = 0.38 + charge * 0.18 + (charge > 0 ? Math.sin(time * 45) * 0.05 * charge : 0);
+      barrelG.position.x = -6 - fire * 16;
+      barrelG.scale.set(1 - fire * 0.12, 1 + fire * 0.18, 1 + fire * 0.18);
+    };
+  };
+
+  /* ---------------- ドミノスイッチ ---------------- */
+  BUILDERS.domino = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#ffe0e0'));
+    const pedestal = mkCyl(26, 30, 18, '#e88a8a', 14, true);
+    pedestal.position.y = 18;
+    g.add(pedestal);
+    const button = mkSphere(20, '#ff5c5c', 14, true);
+    button.scale.set(1, 0.62, 1);
+    button.position.y = 30;
+    g.add(button);
+    // まわりのミニベルト飾り（パタパタするやつの予告）
+    const chip = cachedGeo('dominoChip', () => new T.BoxGeometry(12, 3, 8));
+    for (let i = 0; i < 4; i++) {
+      const m = new T.Mesh(chip, mat('#cfc2df'));
+      const a = (i / 4) * TAU;
+      m.position.set(Math.cos(a) * 38, 12, Math.sin(a) * 38);
+      m.rotation.y = a;
+      g.add(m);
+    }
+    view.update = (dt, time, game) => {
+      const press = Math.sin(Math.min(1, tile.pop) * Math.PI);
+      button.position.y = 30 - press * 8;
+      button.scale.set(1 + press * 0.15, 0.62 - press * 0.2, 1 + press * 0.15);
+      const wave = game.dominoWave ? 1 : 0;
+      pedestal.rotation.y += dt * wave * 6;
+    };
+  };
+
+  /* ---------------- やさいスイッチ ---------------- */
+  BUILDERS.veggie = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#e2f2d8'));
+    const pedestal = mkBox(40, 22, 40, '#8fbf6e', true);
+    pedestal.position.y = 11;
+    g.add(pedestal);
+    // レバー
+    const lever = new T.Group();
+    const rod = mkCyl(3, 3.6, 30, METAL, 8, true);
+    rod.position.y = 15;
+    lever.add(rod);
+    const knob = mkSphere(8, '#57b357', 10, true);
+    knob.position.y = 32;
+    lever.add(knob);
+    lever.position.y = 22;
+    g.add(lever);
+    // アイコン: ブロッコリー & ドーナツ
+    const brocG = new T.Group();
+    const stem = mkCyl(3, 4, 8, '#cfe8b0', 6);
+    brocG.add(stem);
+    for (let i = 0; i < 3; i++) {
+      const fl = mkSphere(6, '#4e9b4e', 8);
+      fl.position.set((i - 1) * 5, 7, 0);
+      brocG.add(fl);
+    }
+    brocG.position.set(-16, 48, 0);
+    g.add(brocG);
+    const mini = new T.Mesh(cachedGeo('miniDonut', () => new T.TorusGeometry(9, 5.5, 8, 14).rotateX(Math.PI / 2)), mat('#ff9ec7'));
+    mini.position.set(16, 46, 0);
+    g.add(mini);
+    view.update = (dt, time, game) => {
+      lever.rotation.z = (game.veggie ? -0.5 : 0.5) + Math.sin(Math.min(1, tile.pop) * Math.PI) * 0.25;
+      brocG.scale.setScalar(game.veggie ? 1.35 : 0.85);
+      mini.scale.setScalar(game.veggie ? 0.85 : 1.35);
+      brocG.position.y = 48 + (game.veggie ? Math.sin(time * 4) * 3 : 0);
+      mini.position.y = 46 + (!game.veggie ? Math.sin(time * 4) * 3 : 0);
+    };
+  };
+
+  /* ---------------- こうじょう反転レバー ---------------- */
+  BUILDERS.flip = (view, tile) => {
+    const g = view.group;
+    g.add(makeBase('#ffe8f2'));
+    const pedestal = mkCyl(22, 26, 20, '#e87aa8', 12, true);
+    pedestal.position.y = 20;
+    g.add(pedestal);
+    // ぐるぐる回る2重矢印
+    const arrowRing = new T.Group();
+    const arcGeo = cachedGeo('flipArc', () => new T.TorusGeometry(24, 4, 8, 18, TAU * 0.36).rotateX(Math.PI / 2));
+    for (const s of [0, Math.PI]) {
+      const arc = new T.Mesh(arcGeo, mat('#ff6f9c'));
+      arc.rotation.y = s;
+      arrowRing.add(arc);
+      const tip = new T.Mesh(cachedGeo('flipTip', () => new T.ConeGeometry(7, 14, 5)), mat('#ff6f9c'));
+      tip.position.set(Math.cos(s + TAU * 0.36) * 24, 0, -Math.sin(s + TAU * 0.36) * 24);
+      tip.rotation.y = s;
+      tip.rotation.x = Math.PI / 2;
+      arrowRing.add(tip);
+    }
+    arrowRing.position.y = 44;
+    g.add(arrowRing);
+    view.spinners.push({ obj: arrowRing, axis: 'y', speed: 1.4 });
+    const knob = mkSphere(8, '#ff5c5c', 10, true);
+    knob.position.y = 62;
+    g.add(knob);
+    view.update = (dt, time, game) => {
+      const press = Math.sin(Math.min(1, tile.pop) * Math.PI);
+      pedestal.scale.set(1 + press * 0.15, 1 - press * 0.2, 1 + press * 0.15);
+      knob.position.y = 62 + Math.sin(time * 3) * 3;
+    };
+  };
+
   /* ---------------- ゲート（こうさてんゲート） ---------------- */
   BUILDERS.gate = (view, tile) => {
     const g = view.group;
