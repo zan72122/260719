@@ -115,7 +115,7 @@ window.GAMES.register = (() => {
     /* --- 商品 (手前のカゴ) --- */
     G3.add(scene, new THREE.BoxGeometry(340, 110, 240),
       new THREE.MeshPhysicalMaterial({ color: 0xc84050, roughness: 0.5, transparent: true, opacity: 0.55 }),
-      -560, BELT_Y + 40, 320);
+      -390, BELT_Y + 40, 330);
     items = [];
     ITEMS.forEach((it, i) => {
       const g = new THREE.Group();
@@ -129,7 +129,7 @@ window.GAMES.register = (() => {
         G3.add(g, new THREE.BoxGeometry(Math.min(50, it.w * 0.6), 26, 2),
           new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), 0, -it.h / 4, it.d / 2 + 1);
       }
-      g.position.set(-640 + (i % 2) * 130, BELT_Y + 110 + it.h / 2 - 40, 280 + Math.floor(i / 2) * 90);
+      g.position.set(-450 + (i % 2) * 120, BELT_Y + 110 + it.h / 2 - 40, 290 + Math.floor(i / 2) * 85);
       scene.add(g);
       items.push({ g, it, state: 'basket', scannedAt: -9 });
       window.__pts['item' + i] = g;
@@ -194,7 +194,7 @@ window.GAMES.register = (() => {
       scanned = 0;
       items.forEach((item, i) => {
         item.state = 'basket';
-        item.g.position.set(-640 + (i % 2) * 130, BELT_Y + 110 + item.it.h / 2 - 40, 280 + Math.floor(i / 2) * 90);
+        item.g.position.set(-450 + (i % 2) * 120, BELT_Y + 110 + item.it.h / 2 - 40, 290 + Math.floor(i / 2) * 85);
       });
       drawDisplay('いらっしゃいませ');
       S.thunk();

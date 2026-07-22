@@ -102,14 +102,14 @@ window.GAMES.toaster = (() => {
     breads = [];
     for (let i = 0; i < 2; i++) {
       const b = mkBread();
-      b.g.position.set(-520 + i * 150, 60, 250);
+      b.g.position.set(-330 + i * 140, 60, 290);
       breads.push(b);
       window.__pts['bread' + i] = b.g;
     }
     /* パンの袋 */
     G3.add(scene, new THREE.BoxGeometry(180, 130, 90),
       new THREE.MeshPhysicalMaterial({ color: 0xe8e0c8, roughness: 0.5, transparent: true, opacity: 0.6 }),
-      -480, 65, 250);
+      -330, 65, 290);
     plateG = new THREE.Group();
     plateG.position.set(520, 10, 220);
     scene.add(plateG);

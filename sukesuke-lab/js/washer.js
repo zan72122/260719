@@ -138,7 +138,7 @@ window.GAMES.washer = (() => {
     gaugeFill.scale.x = 0.01;
     window.__pts.drawer = drawerG;
     bottleG = new THREE.Group();
-    bottleG.position.set(-480, 90, 260);
+    bottleG.position.set(-340, 90, 310);
     scene.add(bottleG);
     G3.add(bottleG, new THREE.CylinderGeometry(44, 50, 150, 10),
       new THREE.MeshPhysicalMaterial({ color: 0x50c0e8, roughness: 0.3, clearcoat: 0.5 }), 0, 75, 0).castShadow = true;
