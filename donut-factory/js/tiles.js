@@ -49,6 +49,16 @@ const TILE_DEFS = {
     interactive: true,
     exitFor(tile) { return tile.dir; },
     onTap(tile, game) {
+      // じぶんで置いたベルトは 4方向を一周したら「ずぽん」と消える
+      // （出現 → 右 → 下 → 左 → 消失 のトグル）
+      if (tile.userPlaced) {
+        tile.tapCycle = (tile.tapCycle || 0) + 1;
+        if (tile.tapCycle >= 4) {
+          removeUserTile(tile);
+          game.noteTinker();
+          return;
+        }
+      }
       tile.dir = rotateCW(tile.dir);
       tile.rotAnim = 1;
       tile.pop = 1;
