@@ -32,7 +32,7 @@ class Sim {
     this.orbA = new Float32Array(maxN);    // mode2: 軌道角
     this.orbS = new Float32Array(maxN);    // mode2: 軌道速度
     this.pIdx = new Uint8Array(maxN);      // mode2: 惑星番号
-    this.verts = new Float32Array((maxN + 96) * 6);
+    this.verts = new Float32Array((maxN + 400) * 6);
     this.W = 0; this.H = 0;
     this.gw = 0; this.gh = 0; this.cells = 0;
     this.events = [];
@@ -205,6 +205,7 @@ class Sim {
     }
 
     const touches = env.touches, pulses = env.pulses, planets = env.planets;
+    const pk = env.power || 0;   // ひかりのちから（0..1）：指の影響力が跳ね上がる
 
     /* --- 粒子ごとの更新 --- */
     for (let i = 0; i < n; i++) {
@@ -309,7 +310,7 @@ class Sim {
         const len2 = rx * rx + ry * ry;
         if (len2 > 0.0001) {
           const len = Math.sqrt(len2);
-          const str = Math.min(len, 1.3) * (cfg.follow ? 300 : 120);
+          const str = Math.min(len, 1.3) * (cfg.follow ? 300 : 120) * (1 + 1.1 * pk);
           fx += rx / len * str;
           fy += ry / len * str;
         }
@@ -363,18 +364,18 @@ class Sim {
           if (tsp > 60) { txp -= tvx / tsp * 55; typ -= tvy / tsp * 55; }
           const ddx = txp - x, ddy = typ - y;
           const dd = Math.hypot(ddx, ddy) || 1;
-          const g = (tc.river ? 90 : 300) / (1 + dd * 0.004);
+          const g = (tc.river ? 90 : 300) * (1 + 1.7 * pk) / (1 + dd * 0.004);
           fx += ddx / dd * g;
           fy += ddy / dd * g;
           if (tsp > 60 && d < 240) {
             // 動く指の速度に乗る（リボンのように率いる）
-            const k = 1 - d / 240;
+            const k = (1 - d / 240) * (1 + 0.5 * pk);
             fx += (tvx * 1.1 - vx[i]) * 2.6 * k;
             fy += (tvy * 1.1 - vy[i]) * 2.6 * k;
           } else if (tc.age > 0.3 && d < 164) {
             // 押しっぱなしで近くは渦に（心拍で強まる）
             const k = 1 - d / 164;
-            const beat = 1 + (tc.pulse || 0) * 1.6;
+            const beat = (1 + (tc.pulse || 0) * 1.6) * (1 + 0.6 * pk);
             fx += (-dy / d) * 260 * k * beat;
             fy += (dx / d) * 260 * k * beat;
             // ためすぎた玉は震えだす（爆発の予感）
@@ -427,10 +428,37 @@ class Sim {
         const band = Math.abs(d - R);
         const bw = 70 + pu.str * 30;
         if (band < bw && pu.age < pu.life) {
-          const k = (1 - pu.age / pu.life) * (1 - band / bw) * pu.str;
+          const k = (1 - pu.age / pu.life) * (1 - band / bw) * pu.str * (1 + 0.7 * pk);
           fx += dx / d * 640 * k;
           fy += dy / d * 640 * k;
         }
+      }
+
+      // 2本指の「ひかりのはし」：指と指の間に光の帯が張られ、群れが流れ込む
+      if (env.bridges) {
+        for (let bi = 0; bi < env.bridges.length; bi++) {
+          const b = env.bridges[bi];
+          const bdx = b.x2 - b.x1, bdy = b.y2 - b.y1;
+          const L2 = bdx * bdx + bdy * bdy;
+          if (L2 < 1) continue;
+          let tt = ((x - b.x1) * bdx + (y - b.y1) * bdy) / L2;
+          tt = tt < 0 ? 0 : (tt > 1 ? 1 : tt);
+          const qx = b.x1 + bdx * tt, qy = b.y1 + bdy * tt;
+          const ddx = qx - x, ddy = qy - y;
+          const dq = Math.hypot(ddx, ddy) || 1;
+          if (dq < 150) {
+            const k = 1 - dq / 150;
+            const L = Math.sqrt(L2);
+            const dirS = (i & 1) ? 1 : -1;       // 半分ずつ逆方向に流れてすれ違う
+            fx += ddx / dq * 340 * k + bdx / L * 200 * k * dirS;
+            fy += ddy / dq * 340 * k + bdy / L * 200 * k * dirS;
+          }
+        }
+      }
+      // 3本指の「にじのあめ」：ふりそそぐ流れ
+      if (env.rain) {
+        fy += 70 * env.rain;
+        fx += Math.sin(t * 1.3 + x * 0.01) * 40 * env.rain;
       }
 
       // 惑星：同じ種は引き寄せ→捕獲、ちがう種はやさしく押し返す
@@ -541,6 +569,15 @@ class Sim {
       }
     }
     return k;
+  }
+
+  /* 惑星タップ：リングの粒子が一斉に飛び上がって戻る */
+  ringJump(pli) {
+    for (let i = this.dustN; i < this.n; i++) {
+      if (this.mode[i] === 2 && this.pIdx[i] === pli) {
+        this.tgtX[i] += rand(25, 75);
+      }
+    }
   }
 
   /* 点(x,y)の半径R内の自由な粒子を四方八方に吹き飛ばす（ためた玉の爆発） */

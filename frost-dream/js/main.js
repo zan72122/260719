@@ -52,7 +52,29 @@
   let whaleSongT = -9;
   let whaleWakeT = 0;
   let flashA = 0;                      // 爆発の白いフラッシュ
+  let hitstopT = 0;                    // 一瞬の世界静止（打撃感）
+  let slowmoT = 0;                     // スローモーション（因果を見せる）
+  let shakeAmp = 0;                    // 画面のゆれ
+  const power = { t: 0, k: 0 };        // ひかりのちから（山場のごほうびで突入）
+  let comboN = 0;                      // 連打コンボ
+  let lastTapT = -9;
+  let myStars = [];                    // タップで生まれて残りつづける「私の星」
+  let rainK = 0;                       // 3本指の虹の雨
+  let rainWaveT = 0;
+  let rainIdx = 0;
+  let curBridges = null;
+  const RAINBOWF = ['#ff6b8a', '#ffab70', '#ffd76e', '#a5e878', '#7db8ff', '#c9a2ff']
+    .map(h => hexToRgb(h).map(v => v / 255));
   const touches = new Map();
+
+  function hitstop(d) { hitstopT = Math.max(hitstopT, d); }
+  function slowmo(d) { slowmoT = Math.max(slowmoT, d); }
+  function shake(a) { shakeAmp = Math.max(shakeAmp, a); }
+  function powerOn() {
+    const was = power.t > 0;
+    power.t = 9;
+    if (!was) AudioSys.powerUp();
+  }
   /* ゆめのディレクター：世界が静かになったらドラマを注入する */
   const director = {
     last: 0, quietT: 0, noTouchT: 0,
@@ -120,6 +142,10 @@
     director.surge = null;
     director.quietT = 0;
     director.last = elapsed;
+    comboN = 0;
+    power.t = 0;
+    rainK = 0;
+    curBridges = null;
     setupAuroras();
 
     planets = [];
@@ -137,7 +163,7 @@
         specIdx: i, color: sp.color, colorF: sp.colorF,
         quota, captured: 0, full: false,
         pulse: 0, blink: 0, blinkT: rand(1.5, 4), noteIdx: i * 2 + (themeIdx % 3),
-        eruptT: rand(2, 4), leakT: rand(5, 8)
+        eruptT: rand(2, 4), leakT: rand(5, 8), bounce: 0, giggleT: 0
       });
     }
     layoutPlanets();
@@ -235,6 +261,27 @@
         whaleT = 12;
       }
       return;
+    }
+    // ブリーチ（大ジャンプ）：放物線で跳び上がり、着水で全画面スプラッシュ
+    if (whale.breach) {
+      whale.breach.t += dt;
+      const k = whale.breach.t / 2.4;
+      const amp = Math.max(70, Math.min(H * 0.45, whale.baseCy - whale.scale * 0.9));
+      whale.excite = 1;
+      if (k >= 1) {
+        whale.cy = whale.baseCy;
+        whale.breach = null;
+        pulses.push({ x: whale.cx, y: whale.baseCy, age: 0, sp: 720, str: 2.0, life: 1.4 });
+        pushWave(whale.cx, whale.baseCy, [0.75, 0.9, 1], 0.9);
+        AudioSys.splash();
+        shake(12);
+        slowmo(0.55);
+        flashA = Math.max(flashA, 0.5);
+        powerOn();
+        director.last = t;
+      } else {
+        whale.cy = whale.baseCy - Math.sin(Math.PI * k) * amp;
+      }
     }
     // なでると身をよじって歌う
     for (const tc of touches.values()) {
@@ -394,20 +441,84 @@
     touches.delete(id);
     if (!tc || state === 'title') return;
     if (!tc.river && !tc.longFired && tc.age < 0.35 && tc.moved < 16) {
-      // タップ
-      for (const pl of planets) {
+      // ---- タップ ----
+      // くじらタップ：3回で大ジャンプ（ブリーチ）
+      if (whale && Math.abs(x - whale.cx) < whale.scale * 1.9 &&
+          Math.abs(y - whale.cy) < whale.scale * 1.15) {
+        whaleTapped();
+        return;
+      }
+      // 惑星タップ：跳ねて、リングの粒子が一斉にジャンプ
+      for (let pi = 0; pi < planets.length; pi++) {
+        const pl = planets[pi];
         if (dist2(x, y, pl.x, pl.y) < (pl.r + 20) * (pl.r + 20)) {
           pl.pulse = 1;
+          pl.bounce = 1;
+          sim.ringJump(pi);
           AudioSys.planetVoice(pl.noteIdx);
+          hitstop(0.045);
+          shake(3);
           return;
         }
       }
-      pulses.push({ x, y, age: 0, sp: 480, str: 1, life: 0.95 });
-      AudioSys.twinkle();
+      // 私の星が生まれて残る
+      myStars.push({ x, y, s: rand(2.2, 4.2), ph: rand(TAU) });
+      if (myStars.length > 60) myStars.shift();
+      // 連打コンボ：波紋 → 大波 → 花火 → ひかりのちから
+      comboN = (elapsed - lastTapT < 1.4) ? comboN + 1 : 1;
+      lastTapT = elapsed;
+      if (comboN === 1) {
+        pulses.push({ x, y, age: 0, sp: 480, str: 1, life: 0.95 });
+        AudioSys.twinkle();
+      } else if (comboN === 2) {
+        pulses.push({ x, y, age: 0, sp: 580, str: 1.4, life: 1.1 });
+        AudioSys.chime(7, { gain: 0.12 });
+        hitstop(0.03);
+      } else if (comboN === 3) {
+        sim.burstAt(x, y, 150);
+        pulses.push({ x, y, age: 0, sp: 700, str: 1.6, life: 1.2 });
+        pushWave(x, y, pick(theme.species).colorF, 0.55);
+        AudioSys.chime(9, { gain: 0.13 });
+        AudioSys.chime(11, { delay: 0.08, gain: 0.11 });
+        hitstop(0.05);
+        shake(4);
+      } else {
+        sim.burstAt(x, y, 210);
+        pulses.push({ x, y, age: 0, sp: 800, str: 2.0, life: 1.4 });
+        pushWave(x, y, [1, 0.97, 0.88], 0.75);
+        AudioSys.bigBoom();
+        shake(7);
+        slowmo(0.4);
+        flashA = Math.max(flashA, 0.6);
+        powerOn();
+        comboN = 0;
+      }
+      // ひかりのちから中は、どのタップも小爆発
+      if (power.k > 0.5 && comboN <= 2) {
+        sim.burstAt(x, y, 140);
+        shake(3);
+      }
     } else if (tc.age > 0.45) {
       // 集まっていた群れを離す「大きな息」
       pulses.push({ x, y, age: 0, sp: 640, str: 1.6, life: 1.35 });
       AudioSys.exhale();
+    }
+  }
+
+  /* くじらタップ → 3回でブリーチ（大ジャンプ→着水スプラッシュ） */
+  function whaleTapped() {
+    if (!whale) return;
+    whale.excite = 1;
+    whale.tapN = (elapsed - (whale.lastTapT || -9) < 6) ? (whale.tapN || 0) + 1 : 1;
+    whale.lastTapT = elapsed;
+    AudioSys.whaleChirp();
+    hitstop(0.05);
+    shake(4);
+    if (whale.tapN >= 3 && !whale.breach) {
+      whale.breach = { t: 0 };
+      whale.baseCy = whale.cy;
+      whale.tapN = 0;
+      AudioSys.whaleSong();
     }
   }
 
@@ -524,6 +635,9 @@
           pushWave(tc.x, tc.y, [1, 0.97, 0.88], 0.85);
           AudioSys.bigBoom();
           flashA = 0.9;
+          shake(9);
+          slowmo(0.5);
+          powerOn();
           director.last = elapsed;
         }
       } else {
@@ -592,6 +706,7 @@
         save(SAVE_STARS, stars);
         updateStarBar();
         AudioSys.fanfare();
+        powerOn();
         hint = null;
       }
     } else if (state === 'celebrate') {
@@ -629,14 +744,42 @@
       }
     }
 
-    /* 惑星の顔まわり・噴水・しずくの補充 */
+    /* ひかりのちからの残り時間 */
+    const powerWas = power.k;
+    power.t = Math.max(0, power.t - dt);
+    power.k += ((power.t > 0 ? 1 : 0) - power.k) * Math.min(1, dt * 5);
+    if (powerWas > 0.4 && power.k <= 0.4 && power.t <= 0) AudioSys.powerDown();
+
+    /* 惑星の顔まわり・噴水・しずくの補充・くすぐり */
     for (let pi = 0; pi < planets.length; pi++) {
       const pl = planets[pi];
       pl.pulse = Math.max(0, pl.pulse - dt * 2.2);
+      pl.bounce = Math.max(0, pl.bounce - dt * 2.6);
       pl.blinkT -= dt;
       if (pl.blinkT <= 0) { pl.blink = 0.16; pl.blinkT = rand(1.8, 4.5); }
       if (pl.blink > 0) pl.blink -= dt;
       if (state !== 'play' && state !== 'celebrate') continue;
+      // 長押しでくすぐったがる
+      let tickled = false;
+      for (const tc of touches.values()) {
+        if (!tc.river && tc.age > 0.6 && Math.hypot(tc.tvx, tc.tvy) < 55 &&
+            dist2(tc.x, tc.y, pl.x, pl.y) < (pl.r + 34) * (pl.r + 34)) {
+          tickled = true;
+          break;
+        }
+      }
+      if (tickled) {
+        pl.giggleT += dt;
+        if (pl.giggleT > 0.55) {
+          pl.giggleT = -0.35;
+          pl.pulse = 1;
+          pl.bounce = Math.max(pl.bounce, 0.8);
+          sim.ringJump(pi);
+          AudioSys.giggle();
+        }
+      } else {
+        pl.giggleT = 0;
+      }
       if (pl.full) {
         // 満ちた惑星は間欠泉：吸い込んだ光を吹き上げて世界に返す
         pl.eruptT -= dt;
@@ -659,17 +802,39 @@
       }
     }
 
+    /* 2本指のひかりのはし・3本指のにじのあめ */
+    const tlist = [...touches.values()];
+    curBridges = null;
+    if (state !== 'title' && tlist.length === 2 &&
+        tlist[0].age > 0.15 && tlist[1].age > 0.15) {
+      curBridges = [{ x1: tlist[0].x, y1: tlist[0].y, x2: tlist[1].x, y2: tlist[1].y }];
+    }
+    const rainOn = state !== 'title' && tlist.length >= 3;
+    rainK += ((rainOn ? 1 : 0) - rainK) * Math.min(1, dt * 4);
+    if (rainOn) {
+      rainWaveT -= dt;
+      if (rainWaveT <= 0) {
+        rainWaveT = 0.5;
+        rainIdx = (rainIdx + 1) % RAINBOWF.length;
+        pushWave(rand(W * 0.2, W * 0.8), -60, RAINBOWF[rainIdx], 0.55);
+        AudioSys.chime(4 + rainIdx, { gain: 0.08 });
+      }
+    }
+
     /* シミュレーション本体 */
     updateDirector(dt, t);
     const activeComets = director.comets.filter(c => c.t >= 0);
     const env = {
       species: theme.species,
-      touches: [...touches.values()],
+      touches: tlist,
       rivers, pulses, planets,
       wind: director.wind,
       comets: activeComets,
       surge: director.surge,
       breath: Math.sin(t * TAU / 8),   // 世界の呼吸
+      power: power.k,                  // ひかりのちから
+      bridges: curBridges,
+      rain: rainK > 0.02 ? rainK : 0,
       events: sim.events
     };
     sim.step(dt, t, env);
@@ -688,9 +853,12 @@
             pl.full = true;
             fullPlanets++;
             AudioSys.bloom(pl.noteIdx);
-            // 惑星の色が波になって画面全体を染める
+            // 惑星の色が波になって画面全体を染める＋ひかりのちから突入
             pushWave(pl.x, pl.y, pl.colorF, 1.1);
             pulses.push({ x: pl.x, y: pl.y, age: 0, sp: 560, str: 1.2, life: 1.1 });
+            slowmo(0.45);
+            shake(6);
+            powerOn();
             // 数字のフォーメーション（1, 2, 3…）
             const dx = W / 2 - pl.x, dy = H / 2 - pl.y;
             const dl = Math.hypot(dx, dy) || 1;
@@ -730,7 +898,7 @@
     // 惑星の光の核（本体も光でできている）
     for (const pl of planets) {
       const [r, g, b] = pl.colorF;
-      const breathe = 1 + Math.sin(t * 1.5 + pl.noteIdx) * 0.04 + pl.pulse * 0.2;
+      const breathe = 1 + Math.sin(t * 1.5 + pl.noteIdx) * 0.04 + pl.pulse * 0.2 + pl.bounce * 0.25;
       const rr = pl.r * breathe;
       sim.appendExtra(pl.x, pl.y, rr * 3.6, r * 0.16, g * 0.16, b * 0.16);
       sim.appendExtra(pl.x, pl.y, rr * 1.9, r * 0.5, g * 0.5, b * 0.5);
@@ -739,11 +907,38 @@
         sim.appendExtra(pl.x, pl.y, rr * (4.6 + Math.sin(t * 2.2) * 0.5), r * 0.12, g * 0.12, b * 0.12);
       }
     }
-    // 指の下の光（ためるほど大きく白く、心拍で脈打つ）
+    // 私の星（タップで生まれて残りつづける星座）
+    for (const st of myStars) {
+      const tw = 0.5 + 0.5 * Math.sin(t * 2 + st.ph);
+      sim.appendExtra(st.x, st.y, st.s * 4.5, 0.55 * tw, 0.5 * tw, 0.34 * tw);
+    }
+    // 指の下の光（ためるほど大きく白く、心拍で脈打つ。ひかりのちから中は虹色）
     for (const tc of touches.values()) {
-      const gs = 60 + tc.charge * 100 + tc.pulse * 45;
-      const b = 0.5 + tc.charge * 0.45;
-      sim.appendExtra(tc.x, tc.y, gs, b, b * 0.96, b);
+      const gs = 60 + tc.charge * 100 + tc.pulse * 45 + power.k * 40;
+      let b = 0.5 + tc.charge * 0.45;
+      let cr = b, cg = b * 0.96, cb = b;
+      if (power.k > 0.05) {
+        const rc = RAINBOWF[Math.floor(t * 5) % RAINBOWF.length];
+        cr = b * (0.4 + rc[0] * 0.9);
+        cg = b * (0.4 + rc[1] * 0.9);
+        cb = b * (0.4 + rc[2] * 0.9);
+      }
+      sim.appendExtra(tc.x, tc.y, gs, cr, cg, cb);
+    }
+    // 2本指のひかりのはし
+    if (curBridges) {
+      for (const b of curBridges) {
+        for (let i = 0; i <= 10; i++) {
+          const tt = i / 10;
+          const wob = Math.sin(t * 7 + i * 1.3) * 6;
+          sim.appendExtra(
+            lerp(b.x1, b.x2, tt) + wob,
+            lerp(b.y1, b.y2, tt) - wob * 0.5,
+            30 + Math.sin(t * 9 + i) * 8,
+            0.45, 0.5, 0.62
+          );
+        }
+      }
     }
     // 彗星の頭と尾
     for (const cm of director.comets) {
@@ -776,7 +971,7 @@
 
     /* 惑星の顔と進みぐあい */
     for (const pl of planets) {
-      const r = pl.r * (1 + pl.pulse * 0.1);
+      const r = pl.r * (1 + pl.pulse * 0.1 + pl.bounce * 0.22);
       const prog = Math.min(1, pl.captured / pl.quota);
       // 進みぐあいの細いリング
       fx.lineCap = 'round';
@@ -864,6 +1059,23 @@
       fx.restore();
     }
 
+    /* ひかりのちから：画面の縁が虹色に輝く */
+    if (power.k > 0.02) {
+      const kk = power.k * (0.5 + 0.25 * Math.sin(t * 6));
+      const grad = fx.createLinearGradient(0, 0, W, H);
+      const cols = ['#ff6b8a', '#ffab70', '#ffd76e', '#a5e878', '#7db8ff', '#c9a2ff'];
+      for (let i = 0; i < cols.length; i++) grad.addColorStop(i / (cols.length - 1), cols[i]);
+      fx.save();
+      fx.strokeStyle = grad;
+      fx.globalAlpha = kk * 0.35;
+      fx.lineWidth = 24;
+      fx.strokeRect(2, 2, W - 4, H - 4);
+      fx.globalAlpha = kk;
+      fx.lineWidth = 7;
+      fx.strokeRect(4, 4, W - 8, H - 8);
+      fx.restore();
+    }
+
     /* 爆発の白いフラッシュ */
     if (flashA > 0) {
       fx.fillStyle = 'rgba(255,252,240,' + (flashA * 0.3) + ')';
@@ -898,11 +1110,16 @@
   /* ---- メインループ ---- */
   function loop(now) {
     requestAnimationFrame(loop);
-    const rawDt = now - lastNow;
+    const rawMs = now - lastNow;
     lastNow = now;
-    let dt = rawDt / 1000;
-    if (dt > 0.05) dt = 0.05;
-    if (dt <= 0) return;
+    let rawSec = rawMs / 1000;
+    if (rawSec > 0.05) rawSec = 0.05;
+    if (rawSec <= 0) return;
+    // ヒットストップ（打撃の一瞬）とスローモーション（因果を見せる）
+    let tScale = 1;
+    if (hitstopT > 0) { tScale = 0.12; hitstopT -= rawSec; }
+    else if (slowmoT > 0) { tScale = 0.3; slowmoT -= rawSec; }
+    const dt = rawSec * tScale;
     elapsed += dt;
 
     update(dt, elapsed);
@@ -914,10 +1131,24 @@
       count: sim.vertCount,
       theme, auroras, t: elapsed,
       breath: Math.sin(elapsed * TAU / 8),
+      powerK: power.k,
       decay: 0.90
     });
     drawOverlay(elapsed);
-    adaptQuality(rawDt);
+
+    // 画面のゆれ
+    if (shakeAmp > 0.3) {
+      const sx = (Math.random() - 0.5) * 2 * shakeAmp;
+      const sy = (Math.random() - 0.5) * 2 * shakeAmp;
+      glCanvas.style.transform = 'translate(' + sx + 'px,' + sy + 'px)';
+      fxCanvas.style.transform = glCanvas.style.transform;
+      shakeAmp *= Math.exp(-5 * rawSec);
+    } else if (shakeAmp !== 0) {
+      shakeAmp = 0;
+      glCanvas.style.transform = '';
+      fxCanvas.style.transform = '';
+    }
+    adaptQuality(rawMs);
   }
 
   /* 動作確認用の小さなフック（ゲームには影響しない） */
@@ -931,6 +1162,9 @@
     formationCount: () => Formations.count(),
     get whale() { return whale; },
     get director() { return director; },
+    get power() { return power; },
+    get myStars() { return myStars; },
+    get combo() { return comboN; },
     get touchList() { return [...touches.values()]; },
     forceWhale: () => { whale = null; whaleT = 0; },
     fireNow: () => fireDirector(elapsed),

@@ -211,7 +211,7 @@ class GLRenderer {
     gl.useProgram(this.pointProg.p);
     gl.uniform2f(this.pointProg.u.uRes, this.W, this.H);
     gl.uniform1f(this.pointProg.u.uSizeScale, this.dpr * 0.5);
-    const breathK = 1 + (frame.breath || 0) * 0.06;
+    const breathK = (1 + (frame.breath || 0) * 0.06) * (1 + (frame.powerK || 0) * 0.16);
     gl.uniform1f(this.pointProg.u.uFall, 1.5);
     gl.uniform1f(this.pointProg.u.uIntensity, 0.26 * breathK);
     this._bindVerts(this.pointProg);

@@ -240,6 +240,43 @@ const AudioSys = (() => {
     for (let i = 0; i < 5; i++) chime(2 + i * 2, { delay: i * 0.09, gain: 0.05 });
   }
 
+  /* くじらの短い返事 */
+  function whaleChirp() {
+    if (!ctx || muted) return;
+    const now2 = ctx.currentTime;
+    if (now2 - lastBoing < 0.2) return;
+    lastBoing = now2;
+    tone({ freq: 260, freqTo: 430, dur: 0.3, gain: 0.1, attack: 0.04 });
+    tone({ freq: 520, freqTo: 860, dur: 0.25, gain: 0.03, attack: 0.04 });
+  }
+
+  /* ブリーチの着水スプラッシュ */
+  function splash() {
+    whoosh(0.9, 0.2, 520, 85);
+    tone({ freq: 95, freqTo: 42, dur: 0.7, gain: 0.2 });
+    for (let i = 0; i < 4; i++) chime(randInt(6, 11), { delay: 0.1 + i * 0.07, gain: 0.06 });
+  }
+
+  /* 惑星のくすぐったい笑い */
+  function giggle() {
+    chime(9, { gain: 0.1, dur: 0.18 });
+    chime(11, { delay: 0.08, gain: 0.1, dur: 0.18 });
+    chime(8, { delay: 0.16, gain: 0.09, dur: 0.22 });
+  }
+
+  /* ひかりのちから：突入ファンファーレと終了の吐息 */
+  function powerUp() {
+    whoosh(0.7, 0.08, 300, 2600);
+    const seq = [0, 4, 7, 9, 12];
+    for (let i = 0; i < seq.length; i++) {
+      chime(seq[i], { delay: i * 0.07, gain: 0.13, dur: 0.5 });
+    }
+  }
+  function powerDown() {
+    chime(7, { gain: 0.07, dur: 0.8 });
+    chime(4, { delay: 0.18, gain: 0.06, dur: 1.0 });
+  }
+
   /* 背景でゆっくり鳴りつづける、風鈴のような環境音 */
   function startAmbient() {
     if (ambientTimer) return;
@@ -260,6 +297,7 @@ const AudioSys = (() => {
     unlock, setMuted, isMuted,
     chime, sparkleTick, boing, absorb, shimmer, formationChord,
     planetVoice, bloom, fanfare, twinkle, whaleSong, exhale,
-    heartBeat, chargeTick, bigBoom, geyser, gust, comet
+    heartBeat, chargeTick, bigBoom, geyser, gust, comet,
+    whaleChirp, splash, giggle, powerUp, powerDown
   };
 })();
