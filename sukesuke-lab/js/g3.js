@@ -147,6 +147,36 @@ const G3 = {
   },
 
   /* 長さが変わったときだけジオメトリを作り直すばねメッシュ管理 */
+  /* 簡易人形 (だっこして運べるサイズ感)。scale=1 で身長 ~150 */
+  doll(opts) {
+    const o = opts || {};
+    const g = new THREE.Group();
+    const skin = new THREE.MeshStandardMaterial({ color: o.skin || 0xe8b892, roughness: 0.6 });
+    const shirt = new THREE.MeshStandardMaterial({ color: o.shirt || 0xd85a4a, roughness: 0.55 });
+    const pants = new THREE.MeshStandardMaterial({ color: o.pants || 0x3a5a8c, roughness: 0.6 });
+    const head = new THREE.Mesh(new THREE.SphereGeometry(24, 16, 12), skin);
+    head.position.y = 122;
+    head.castShadow = true;
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(25, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshStandardMaterial({ color: o.hair || 0x4a3222, roughness: 0.8 }));
+    hair.position.y = 126;
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(19, 40, 6, 12), shirt);
+    body.position.y = 76;
+    body.castShadow = true;
+    const legL = new THREE.Mesh(new THREE.CapsuleGeometry(8.5, 34, 4, 8), pants);
+    legL.position.set(-10, 26, 0);
+    const legR = legL.clone();
+    legR.position.x = 10;
+    const armL = new THREE.Mesh(new THREE.CapsuleGeometry(6.5, 30, 4, 8), shirt);
+    armL.position.set(-26, 84, 0);
+    const armR = armL.clone();
+    armR.position.x = 26;
+    g.add(head, hair, body, legL, legR, armL, armR);
+    const s = o.scale || 1;
+    g.scale.setScalar(s);
+    return { g, head, body, legL, legR, armL, armR };
+  },
+
   springMesh(parent, material, coils, coilR, wireR) {
     let mesh = null, shown = -1;
     return {
