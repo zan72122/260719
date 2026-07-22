@@ -25,6 +25,8 @@ function makeTile(spec, x, y) {
     count: 0,
     shipT: 0,
     totalCount: 0,
+    spawnAnim: 0,     // 設置時の「ぽこっ」
+    userPlaced: false,
   }, spec);
 }
 
@@ -65,7 +67,8 @@ const TILE_DEFS = {
       tile.pop = 1;
     },
     update(tile, dt, game) {
-      tile.timer -= dt * game.speed;
+      const flow = game.flow ? game.flow() : game.speed;
+      tile.timer -= dt * flow * (game.orderBoost || 1);
       if (tile.timer <= 0) {
         if (game.isTileClogged(tile)) { tile.timer = 0.5; return; }   // つまってたら待つ
         tile.timer = game.level.spawnEvery || 2.5;

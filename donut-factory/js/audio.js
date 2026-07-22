@@ -124,6 +124,10 @@ const AudioSys = (() => {
       tone(435, 0.3, { type: 'square', vol: 0.2, delay: 0.24 });
     },
     beep()     { tone(880, 0.12, { type: 'square', vol: 0.14 }); tone(880, 0.12, { type: 'square', vol: 0.14, delay: 0.3 }); },
+    powerDown() { tone(420, 0.7, { type: 'sawtooth', slideTo: 55, vol: 0.25 }); tone(210, 0.7, { type: 'sine', slideTo: 40, vol: 0.2, delay: 0.05 }); },
+    rain()     { noise(0.5, { filter: 'lowpass', freq: 900, vol: 0.18 }); tone(700, 0.4, { type: 'sine', slideTo: 400, vol: 0.1, delay: 0.1 }); },
+    pokon()    { tone(240, 0.14, { type: 'sine', slideTo: 520, vol: 0.5 }); tone(520, 0.1, { type: 'sine', slideTo: 700, vol: 0.25, delay: 0.1 }); },
+    zupon()    { tone(520, 0.16, { type: 'sine', slideTo: 160, vol: 0.45 }); noise(0.1, { filter: 'lowpass', freq: 900, vol: 0.2, delay: 0.06 }); },
   };
 
   function sfx(name, arg) {

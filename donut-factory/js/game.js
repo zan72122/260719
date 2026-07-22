@@ -24,6 +24,23 @@ const Game = {
   guide: null,
   pointers: new Map(),
   saved: { level: 0, muted: false, counts: {} },
+  // わたしのこうじょう（設置ブラシ）
+  brush: 'belt',
+  userTileCount: 0,
+  // ハプニングイベント
+  event: null,
+  eventTimer: 75,
+  orderBoost: 1,
+};
+
+// 全体の流れ係数（ターボ × イベント効果）。停電=0、あめ=1.6倍
+Game.flow = function () {
+  let m = 1;
+  if (Game.event) {
+    if (Game.event.type === 'blackout') m = 0;
+    else if (Game.event.type === 'rain') m = 1.6;
+  }
+  return Game.speed * m;
 };
 
 /* ============================================================
@@ -53,6 +70,11 @@ function loadLevel(index) {
   Game.donuts = [];
   Game.guide = null;
   Game.idleT = 0;
+  Game.userTileCount = 0;
+  Game.event = null;
+  Game.orderBoost = 1;
+  Game.eventTimer = rand(60, 100);
+  hideBanner();
 
   for (let y = 0; y < Game.rows; y++) {
     const row = [];
@@ -116,6 +138,140 @@ Game.isTileClogged = function (tile) {
   return Game.donuts.some(d =>
     d.state === 'belt' && d.stopped && dist2(d.x, d.y, c.x, c.y) < r2);
 };
+
+/* ============================================================
+ * わたしのこうじょう — ゆかに自由に設置・長押しで撤去
+ * ============================================================ */
+const USER_TILE_CAP = 40;
+
+function smartDir(tx, ty) {
+  // となりにベルト等があれば、そちらへ流す向きにする
+  for (let d = 0; d < 4; d++) {
+    const nt = tileAt(tx + DX[d], ty + DY[d]);
+    if (nt && TILE_DEFS[nt.type].walkable) return d;
+  }
+  return DIR_E;
+}
+
+function placeUserTile(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= Game.cols || ty >= Game.rows) return false;
+  if (Game.tiles[ty][tx]) return false;
+  const c = { x: (tx + 0.5) * CELL, y: (ty + 0.5) * CELL };
+  if (Game.userTileCount >= USER_TILE_CAP) {
+    Particles.sparkle(c.x, c.y, 4, '#ffffff');
+    AudioSys.sfx('tick');
+    return true;
+  }
+  let spec;
+  switch (Game.brush) {
+    case 'froster':   spec = { type: 'froster', color: pick(FROST_CYCLE) }; break;
+    case 'sprinkler': spec = { type: 'sprinkler', style: pick(SPRINKLE_CYCLE) }; break;
+    case 'jump':      spec = { type: 'jump' }; break;
+    default:          spec = { type: 'belt' };
+  }
+  spec.dir = smartDir(tx, ty);
+  const tile = makeTile(spec, tx, ty);
+  tile.userPlaced = true;
+  tile.spawnAnim = 1;
+  tile.pop = 0.5;
+  Game.tiles[ty][tx] = tile;
+  Game.tileList.push(tile);
+  Game.userTileCount++;
+  Render3D.addTileView(tile);
+  AudioSys.sfx('pokon');
+  Particles.puff(c.x, c.y, 5, '#ffffff');
+  Particles.sparkle(c.x, c.y, 6, '#aef2ae');
+  Game.noteTinker();
+  return true;
+}
+
+function removeUserTile(tile) {
+  if (!tile.userPlaced) return;
+  if (Game.tiles[tile.y][tile.x] !== tile) return;
+  Game.tiles[tile.y][tile.x] = null;
+  const i = Game.tileList.indexOf(tile);
+  if (i >= 0) Game.tileList.splice(i, 1);
+  Game.userTileCount = Math.max(0, Game.userTileCount - 1);
+  Render3D.removeTileView(tile);
+  // うえにいたドーナツはころがりおちる
+  for (const d of Game.donuts) {
+    if (d.state === 'belt' && d.tx === tile.x && d.ty === tile.y) startFall(d, d.exitDir);
+  }
+  const c = tileCenter(tile);
+  AudioSys.sfx('zupon');
+  Particles.puff(c.x, c.y, 6, '#ffffff');
+  Particles.crumbs(c.x, c.y, 4);
+  Game.noteTinker();
+}
+
+/* ============================================================
+ * ハプニングイベント（あめ・ていでん・おおちゅうもん）
+ * ============================================================ */
+const EVENTS = {
+  rain:     { emoji: '☔', text: 'あめだ！ みんな いそげ〜！', dur: 22 },
+  blackout: { emoji: '💡', text: 'ていでん！ タップで なおして！', dur: 18 },
+  order:    { emoji: '📋', text: 'おおちゅうもん！ ドーナツ いっぱい つくって！', dur: 20 },
+};
+
+function startEvent(type) {
+  const def = EVENTS[type];
+  Game.event = { type, t: 0, dur: def.dur, data: { taps: 0, restore: 0 } };
+  showBanner(def.emoji, def.text, type === 'blackout' ? 17000 : 3200);
+  if (type === 'rain') {
+    AudioSys.sfx('rain');
+    AudioSys.sfx('shaker');
+  } else if (type === 'blackout') {
+    AudioSys.sfx('powerDown');
+    Render3D.shake(6);
+  } else {
+    AudioSys.sfx('honk');
+    AudioSys.sfx('bigPop');
+    Game.orderBoost = 4;
+  }
+}
+
+function endEvent() {
+  if (!Game.event) return;
+  const type = Game.event.type;
+  const fixed = type === 'blackout' && Game.event.data.taps >= 3;
+  Game.event = null;
+  Game.orderBoost = 1;
+  Game.eventTimer = rand(85, 130);
+  hideBanner();
+  if (type === 'blackout') {
+    AudioSys.sfx('fanfare');
+    Render3D.punch(0.4);
+    for (let i = 0; i < 3; i++) {
+      Particles.confetti(rand(0, Game.cols * CELL), rand(0, Game.rows * CELL), 8);
+    }
+    if (fixed) showBanner('🌟', 'なおった！ ありがとう！', 2600);
+  }
+}
+
+function updateEvents(dt) {
+  if (Game.event) {
+    Game.event.t += dt;
+    if (Game.event.t >= Game.event.dur) endEvent();
+  } else {
+    Game.eventTimer -= dt;
+    if (Game.eventTimer <= 0) startEvent(pick(['rain', 'blackout', 'order']));
+  }
+}
+
+let _bannerTimer = null;
+function showBanner(emoji, text, ms = 3000) {
+  const b = document.getElementById('event-banner');
+  if (!b) return;
+  document.getElementById('event-emoji').textContent = emoji;
+  document.getElementById('event-text').textContent = text;
+  b.classList.remove('hidden');
+  if (_bannerTimer) clearTimeout(_bannerTimer);
+  _bannerTimer = setTimeout(() => b.classList.add('hidden'), ms);
+}
+function hideBanner() {
+  const b = document.getElementById('event-banner');
+  if (b) b.classList.add('hidden');
+}
 
 /* ============================================================
  * ドーナツ操作 API（タイルから呼ばれる）
@@ -256,7 +412,7 @@ function fireCenter(d) {
 
 function updateBeltDonut(d, dt) {
   if (d.stopped) return;
-  let remaining = BASE_SPEED * Game.speed * dt;
+  let remaining = BASE_SPEED * Game.flow() * dt;
   let guard = 0;
   while (remaining > 0 && d.state === 'belt' && guard++ < 8) {
     const tile = tileAt(d.tx, d.ty);
@@ -355,7 +511,7 @@ function updateDonuts(dt) {
         break;
 
       case 'jump': {
-        d.stateTime += dt * Game.speed;
+        d.stateTime += dt * Math.max(0.0001, Game.flow());
         const a = d.aux;
         const k = Math.min(1, d.stateTime / a.dur);
         d.x = lerp(a.sx, a.ex, k);
@@ -496,6 +652,19 @@ function onPointerDown(e) {
   const rect = Game.canvas.getBoundingClientRect();
   const w = Render3D.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
 
+  // 0) ていでん中はどこをタップしても「しゅうり」
+  if (Game.event && Game.event.type === 'blackout') {
+    const ev = Game.event;
+    ev.data.taps++;
+    ev.data.restore = Math.min(1, ev.data.taps / 3);
+    AudioSys.sfx('zap');
+    Render3D.flash(w.x, w.y, '#fff6b8', 160);
+    Particles.sparkle(w.x, w.y, 8, '#fff6b8');
+    if (ev.data.taps >= 3) endEvent();
+    Game.pointers.set(e.pointerId, { kind: 'tap' });
+    return;
+  }
+
   // 1) ドーナツをつかむ
   const d = hitDonut(w.x, w.y);
   if (d) {
@@ -510,19 +679,29 @@ function onPointerDown(e) {
     return;
   }
 
-  // 2) タイルをタップ
+  // 2) タイルをタップ（じぶんで置いたものは長押しで撤去）
   const tx = Math.floor(w.x / CELL), ty = Math.floor(w.y / CELL);
   const tile = tileAt(tx, ty);
   if (tile) {
     const def = TILE_DEFS[tile.type];
     if (def.onTap) {
       def.onTap(tile, Game, w.x, w.y);
-      Game.pointers.set(e.pointerId, { kind: 'tap' });
+      const rec = { kind: 'tap', sx: e.clientX, sy: e.clientY };
+      if (tile.userPlaced) {
+        rec.lpTimer = setTimeout(() => {
+          if (Game.pointers.get(e.pointerId) === rec) removeUserTile(tile);
+        }, 650);
+      }
+      Game.pointers.set(e.pointerId, rec);
       return;
     }
   }
 
-  // 3) ゆかタップもたのしい
+  // 3) なにもないところ → えらんだ装置を「ぽこっ」と設置！
+  if (placeUserTile(tx, ty)) {
+    Game.pointers.set(e.pointerId, { kind: 'placed' });
+    return;
+  }
   Particles.sparkle(w.x, w.y, 6, '#ffffff');
   AudioSys.sfx('tick');
   Game.pointers.set(e.pointerId, { kind: 'tap' });
@@ -530,7 +709,16 @@ function onPointerDown(e) {
 
 function onPointerMove(e) {
   const p = Game.pointers.get(e.pointerId);
-  if (!p || p.kind !== 'grab') return;
+  if (!p) return;
+  // 長押し判定：ゆびが大きく動いたらキャンセル
+  if (p.kind === 'tap') {
+    if (p.lpTimer !== undefined && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 18) {
+      clearTimeout(p.lpTimer);
+      p.lpTimer = undefined;
+    }
+    return;
+  }
+  if (p.kind !== 'grab') return;
   e.preventDefault();
   const rect = Game.canvas.getBoundingClientRect();
   const w = Render3D.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
@@ -542,6 +730,7 @@ function onPointerMove(e) {
 function onPointerUp(e) {
   const p = Game.pointers.get(e.pointerId);
   Game.pointers.delete(e.pointerId);
+  if (p && p.lpTimer !== undefined) clearTimeout(p.lpTimer);
   if (!p || p.kind !== 'grab') return;
   e.preventDefault();
   const d = p.donut;
@@ -621,6 +810,18 @@ function setupHUD() {
     AudioSys.sfx(Game.speed === 1 ? 'clunk' : 'slide');
     Game.noteTinker();
   });
+
+  // わたしのこうじょう：設置ブラシのパレット
+  const palBtns = document.querySelectorAll('.pal-btn');
+  palBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      AudioSys.ensure();
+      Game.brush = btn.dataset.brush;
+      palBtns.forEach(b => b.classList.toggle('selected', b === btn));
+      AudioSys.sfx('pop');
+      Game.noteTinker();
+    });
+  });
 }
 
 function refreshLevelGrid() {
@@ -662,6 +863,7 @@ function frame(ts) {
     updateDonuts(dt);
     Particles.update(dt);
     updateGuide(dt);
+    updateEvents(dt);
   }
   Render3D.render(Game, dt);
   requestAnimationFrame(frame);

@@ -508,17 +508,36 @@ const Render3D = (() => {
     const inner = view.popTarget || g;
     const baseUpdate = view.update;
     view.update = (dt, time, game) => {
-      // pop でバウンス
-      const s = 1 + 0.13 * Math.sin(Math.min(1, tile.pop) * Math.PI);
+      // pop でバウンス + 設置時の「ぽこっ」
+      let s = 1 + 0.13 * Math.sin(Math.min(1, tile.pop) * Math.PI);
+      if (tile.spawnAnim > 0) {
+        tile.spawnAnim = Math.max(0, tile.spawnAnim - dt * 3.2);
+        s *= Math.max(0.05, easeOutBack(1 - tile.spawnAnim));
+      }
       inner.scale.set(s, s, s);
-      // 常時回転（pop で加速）
+      // 常時回転（pop で加速・停電で停止）
+      const flow = game.flow ? game.flow() : game.speed;
       const boost = 1 + tile.pop * 2.5;
       for (const sp of view.spinners) {
-        sp.obj.rotation[sp.axis] += sp.speed * dt * game.speed * boost;
+        sp.obj.rotation[sp.axis] += sp.speed * dt * flow * boost;
       }
       if (baseUpdate) baseUpdate(dt, time, game);
     };
     return view;
+  }
+
+  // ユーザー設置タイルの動的追加/削除
+  function addTileView(tile) {
+    const v = buildTileView(tile, Game.level.theme);
+    levelGroup.add(v.group);
+    tileViews.push(v);
+  }
+  function removeTileView(tile) {
+    const i = tileViews.findIndex(v => v.tile === tile);
+    if (i >= 0) {
+      levelGroup.remove(tileViews[i].group);
+      tileViews.splice(i, 1);
+    }
   }
 
   /* ---- 17種の装置ビルダーは builders 部で BUILDERS に登録 ---- */
@@ -539,6 +558,8 @@ const Render3D = (() => {
 
     const theme = game.level.theme;
     scene.background = new T.Color(theme.bg);
+    env.baseBg.set(theme.bg);
+    env.dark = 0; env.rain = 0;
 
     levelGroup = new T.Group();
     scene.add(levelGroup);
@@ -714,16 +735,55 @@ const Render3D = (() => {
     return { x: (_v3.x + 1) / 2 * vw, y: (1 - _v3.y) / 2 * vh };
   }
 
+  /* ============================ 環境（あめ・ていでん） ============================ */
+
+  const env = {
+    dark: 0, rain: 0,
+    baseBg: new T.Color('#ffd9ec'),
+    darkBg: new T.Color('#2a2440'),
+    rainBg: new T.Color('#b9c6dc'),
+    tmp: new T.Color(),
+  };
+
+  function updateEnvironment(game, dt) {
+    const ev = game.event;
+    let tDark = 0, tRain = 0;
+    if (ev) {
+      if (ev.type === 'blackout') tDark = 1 - (ev.data.restore || 0);
+      if (ev.type === 'rain') tRain = 1;
+    }
+    env.dark += (tDark - env.dark) * Math.min(1, dt * 3);
+    env.rain += (tRain - env.rain) * Math.min(1, dt * 2);
+    hemiLight.intensity = 0.62 * (1 - env.dark * 0.92) * (1 - env.rain * 0.15);
+    dirLight.intensity = 0.46 * (1 - env.dark * 0.96);
+    env.tmp.copy(env.baseBg);
+    if (env.rain > 0.01) env.tmp.lerp(env.rainBg, env.rain * 0.55);
+    if (env.dark > 0.01) env.tmp.lerp(env.darkBg, env.dark);
+    if (scene.background && scene.background.isColor) scene.background.copy(env.tmp);
+    // あめつぶ
+    if (env.rain > 0.4) {
+      for (let i = 0; i < 3; i++) {
+        Particles.spawn({
+          kind: 'drop',
+          x: rand(-40, game.cols * CELL + 40), z: rand(-40, game.rows * CELL + 40),
+          h: 175, vx: 6, vz: 4, vh: -420, g: 0,
+          maxLife: 0.45, size: 6, color: '#9ec8f0',
+        });
+      }
+    }
+  }
+
   /* ============================ 毎フレーム ============================ */
 
   function render(game, dt) {
-    beltTex.offset.x -= dt * game.speed * 0.9;
+    beltTex.offset.x -= dt * (game.flow ? game.flow() : game.speed) * 0.9;
 
     for (const v of tileViews) v.update(dt, game.time, game);
 
     Donut3D.sync(game, game.time);
     Particles.sync();
     updateFX(dt);
+    updateEnvironment(game, dt);
 
     if (game.guide) {
       const c = tileCenter(game.guide.tile);
@@ -747,7 +807,7 @@ const Render3D = (() => {
 
   return {
     init, buildLevel, fitCamera, resize, render, screenToWorld, worldToScreen,
-    shake, punch, flash,
+    shake, punch, flash, addTileView, removeTileView,
     // builders 部（render3d-machines.js）が使う内部API
     _internals: {
       get T() { return T; },

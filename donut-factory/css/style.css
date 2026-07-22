@@ -47,6 +47,66 @@ html, body {
 #btn-rainbow { bottom: calc(10px + env(safe-area-inset-bottom)); left:  calc(10px + env(safe-area-inset-left)); }
 #btn-turbo   { bottom: calc(10px + env(safe-area-inset-bottom)); right: calc(10px + env(safe-area-inset-right)); }
 
+/* ---------- 設置パレット ---------- */
+#palette {
+  position: fixed;
+  left: calc(10px + env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  z-index: 20;
+}
+.pal-btn {
+  width: 50px;
+  height: 50px;
+  border: none;
+  border-radius: 16px;
+  font-size: 26px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 3px 8px rgba(190, 120, 160, 0.3), inset 0 -3px 0 rgba(230, 170, 200, 0.5);
+  transition: transform 0.12s ease;
+  touch-action: manipulation;
+  cursor: pointer;
+  padding: 0;
+}
+.pal-btn:active { transform: scale(0.85); }
+.pal-btn.selected {
+  background: #ffe89a;
+  outline: 4px solid #ffb840;
+}
+
+/* ---------- イベントバナー ---------- */
+#event-banner {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%) scale(1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(190, 100, 150, 0.4);
+  z-index: 30;
+  pointer-events: none;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+  opacity: 1;
+}
+#event-banner.hidden {
+  transform: translateX(-50%) scale(0.3);
+  opacity: 0;
+}
+#event-emoji { font-size: 34px; line-height: 1; }
+#event-text {
+  font-size: 22px;
+  font-weight: 800;
+  color: #b25a8b;
+}
+
 /* ---------- overlays ---------- */
 .overlay {
   position: fixed;
