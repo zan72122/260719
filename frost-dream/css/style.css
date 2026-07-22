@@ -20,7 +20,7 @@ html, body {
   font-family: -apple-system, "Hiragino Maru Gothic ProN", "BIZ UDGothic", "Yu Gothic", sans-serif;
 }
 
-#game {
+#gl, #fx {
   position: fixed;
   top: 0;
   left: 0;
@@ -28,6 +28,10 @@ html, body {
   height: 100%;
   touch-action: none;
   display: block;
+}
+#fx {
+  pointer-events: none;
+  z-index: 2;
 }
 
 /* ---- タイトル画面 ---- */
@@ -96,6 +100,78 @@ html, body {
   0%, 100% { transform: scale(1); box-shadow: 0 0 24px rgba(255, 150, 210, 0.8); }
   50% { transform: scale(1.08); box-shadow: 0 0 42px rgba(255, 150, 210, 1); }
 }
+#nameBtn {
+  pointer-events: auto;
+  display: block;
+  margin: 22px auto 0;
+  padding: 10px 22px;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: clamp(0.85rem, 3.6vw, 1.05rem);
+  font-family: inherit;
+}
+#nameBtn:active { background: rgba(255, 255, 255, 0.3); }
+
+/* ---- なまえモーダル ---- */
+#nameModal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 5, 30, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+#nameModal.hidden { display: none; }
+.modal-card {
+  background: linear-gradient(160deg, #3a2560, #1e123e);
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  border-radius: 22px;
+  padding: 26px 26px 22px;
+  width: min(86vw, 360px);
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+.modal-card p {
+  font-size: 1.05rem;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.modal-card small { opacity: 0.75; font-size: 0.8rem; }
+#nameInput {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 14px;
+  font-size: 1.3rem;
+  text-align: center;
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.92);
+  color: #2a1a4e;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.modal-btns {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.modal-btns button {
+  flex: 1;
+  padding: 12px 0;
+  border: none;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+}
+#nameSave { background: linear-gradient(135deg, #ff8fb4, #c9a2ff); color: #fff; }
+#nameSkip { background: rgba(255, 255, 255, 0.16); color: #fff; }
 
 /* ---- HUD ---- */
 #hud {

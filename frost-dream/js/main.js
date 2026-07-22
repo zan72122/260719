@@ -1,56 +1,127 @@
 'use strict';
 /*
- * ひかりのたび — メインループと入力
- * ・指で道を描くと、近くのひかりのこどもが道に沿って飛んでいく（マルチタッチ対応）
- * ・タップすると星くずが生まれて、みんなが遊びに集まってくる
- * ・同じ色の惑星にとどけると吸い込まれて、惑星がどんどん笑顔になる
- * ・ぜんぶとどけたら大よろこびのおまつり → つぎのゆめへ
+ * ひかりのたび v2 — メイン統合
+ * 数万の光の粒でできた夢の世界。指で光の川を描いて群れを導き、
+ * 押さえて渦を巻き、タップで波紋を起こし、長押しで形を咲かせる。
  */
 
 (() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
+  const glCanvas = document.getElementById('gl');
+  const fxCanvas = document.getElementById('fx');
+  const fx = fxCanvas.getContext('2d');
   const titleEl = document.getElementById('title');
   const hudEl = document.getElementById('hud');
   const starBarEl = document.getElementById('starBar');
   const muteBtn = document.getElementById('muteBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const nameBtn = document.getElementById('nameBtn');
+  const nameModal = document.getElementById('nameModal');
+  const nameInput = document.getElementById('nameInput');
+  const nameSave = document.getElementById('nameSave');
+  const nameSkip = document.getElementById('nameSkip');
+
+  const SAVE_THEME = 'hikariTabi.theme';
+  const SAVE_STARS = 'hikariTabi.stars';
+  const SAVE_NAME = 'hikariTabi.name';
+
+  function save(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+  function load(k, d) { try { return localStorage.getItem(k) || d; } catch (e) { return d; } }
+
+  /* ---- レンダラ（WebGL → だめなら2D） ---- */
+  let renderer = new GLRenderer(glCanvas);
+  let isGL = !!renderer.ok;
+  if (!isGL) renderer = new Canvas2DRenderer(glCanvas);
+
+  const MAXN = 24000;
+  let N = isGL ? 9000 : 2200;
+  const sim = new Sim(MAXN);
 
   let W = 0, H = 0, DPR = 1;
-
-  /* ---- ゲーム状態 ---- */
-  let mode = 'title';           // title | play | celebrate | fade
-  let level = 1;
-  let spec = null;
-  let spirits = [];
-  let planets = [];
-  const paths = new Map();      // pointerId -> path
-  let lures = [];
+  let state = 'title';                // title | play | celebrate | transition
+  let themeIdx = 0;
+  let theme = THEMES[0];
   let stars = 0;
+  let childName = load(SAVE_NAME, '');
+
+  let planets = [];
+  let rivers = [];
+  let pulses = [];
+  const touches = new Map();
+  let auroras = [];
+  let auroraDefs = [];
+
+  let elapsed = 0;
+  let lastNow = performance.now();
+  let bannerT = 99;
   let idleT = 0;
   let hint = null;
-  let intro = null;             // 新しいなかまのお披露目
-  let bannerT = 0;              // レベル名の表示
-  let celebrateT = 0;
-  let fwTimer = 0;
-  let emojiTimer = 0;
-  let fadeT = 0;
-  let fadeDir = 0;              // 1=暗く 2=明るく
-  let lastNow = performance.now();
-  let elapsed = 0;
-  const assist = new Set();
+  let animalT = rand(30, 50);
+  let titleFormT = 2.5;
+  let fullPlanets = 0;
+  let ct = 0;                          // celebrate timer
+  let celebrateStep = 0;
+  let fireworkT = 0;
+  let fadeA = 0;                       // transition fade
+  let fadeDir = 0;
+  let frozenQuality = false;
+  let frameAcc = 0, frameCnt = 0;
 
-  const PATH_FADE = 3.0;
-  const SAVE_LEVEL = 'hikariTabi.level';
-  const SAVE_STARS = 'hikariTabi.stars';
-  const SAVE_FORMS = 'hikariTabi.forms';
-
-  /* ---- 保存 ---- */
-  function save(key, val) {
-    try { localStorage.setItem(key, String(val)); } catch (e) { /* プライベートモード */ }
+  /* ---- テーマ・惑星のセットアップ ---- */
+  function setupAuroras() {
+    auroraDefs = [];
+    for (let i = 0; i < 3; i++) {
+      auroraDefs.push({
+        nx: rand(0.12, 0.88), ny: rand(0.08, 0.7),
+        rf: rand(0.34, 0.6),
+        colorF: theme.glowF[i % theme.glowF.length],
+        ph: rand(TAU), spx: rand(0.05, 0.13), spy: rand(0.04, 0.1),
+        ax: rand(0.05, 0.1), ay: rand(0.04, 0.08)
+      });
+    }
+    auroras = auroraDefs.map(() => ({ x: 0, y: 0, r: 1, intensity: 0, colorF: [0, 0, 0] }));
   }
-  function load(key, def) {
-    try { return localStorage.getItem(key) || def; } catch (e) { return def; }
+
+  function layoutPlanets() {
+    for (const pl of planets) {
+      pl.x = pl.nx * W;
+      pl.y = pl.ny * H;
+      pl.r = clamp(Math.min(W, H) * 0.072, 26, 56);
+    }
+  }
+
+  function setupTheme(idx, reseed) {
+    themeIdx = ((idx % THEMES.length) + THEMES.length) % THEMES.length;
+    theme = THEMES[themeIdx];
+    save(SAVE_THEME, themeIdx);
+    Formations.releaseAll(sim);
+    rivers = [];
+    pulses = [];
+    hint = null;
+    idleT = 0;
+    bannerT = 0;
+    fullPlanets = 0;
+    animalT = rand(25, 45);
+    setupAuroras();
+
+    planets = [];
+    const k = theme.species.length;
+    const swarmPer = Math.floor((N - Math.floor(N * 0.3)) / k);
+    const quota = clamp(Math.round(swarmPer * 0.42), 120, 850);
+    const a0 = rand(TAU);
+    for (let i = 0; i < k; i++) {
+      const a = a0 + i * TAU / k;
+      const sp = theme.species[i];
+      planets.push({
+        nx: clamp(0.5 + 0.37 * Math.cos(a), 0.13, 0.87),
+        ny: clamp(0.5 + 0.36 * Math.sin(a), 0.15, 0.85),
+        x: 0, y: 0, r: 40,
+        specIdx: i, color: sp.color, colorF: sp.colorF,
+        quota, captured: 0, full: false,
+        pulse: 0, blink: 0, blinkT: rand(1.5, 4), noteIdx: i * 2 + (themeIdx % 3)
+      });
+    }
+    layoutPlanets();
+    if (reseed) sim.init(theme, W, H, N, planets);
   }
 
   /* ---- リサイズ ---- */
@@ -58,254 +129,144 @@
     W = window.innerWidth;
     H = window.innerHeight;
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(W * DPR);
-    canvas.height = Math.round(H * DPR);
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    for (const p of planets) p.layout(W, H);
-    if (spec) Background.init(spec.theme, W, H);
-    else Background.init(THEMES[0], W, H);
-    // 画面外に出たスピリットをやさしく戻す
-    for (const s of spirits) {
-      s.x = clamp(s.x, 4, W - 4);
-      s.y = clamp(s.y, 4, H - 4);
-    }
+    renderer.resize(W, H, DPR);
+    fxCanvas.width = Math.round(W * DPR);
+    fxCanvas.height = Math.round(H * DPR);
+    fx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    sim.resize(W, H);
+    layoutPlanets();
   }
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 300));
 
-  /* ---- レベル生成 ---- */
-  function makeSpirits(sp) {
-    const list = [];
-    const k = sp.colors.length;
-    for (let gi = 0; gi < k; gi++) {
-      const key = sp.colors[gi];
-      const color = PALETTE[key];
-      // 群れの発生地点：その色の惑星の反対側あたり
-      const pl = planets[gi];
-      let cx = W * (1 - pl.nx) + rand(-W * 0.08, W * 0.08);
-      let cy = H * (1 - pl.ny) + rand(-H * 0.08, H * 0.08);
-      cx = clamp(cx, W * 0.15, W * 0.85);
-      cy = clamp(cy, H * 0.15, H * 0.85);
-      for (let i = 0; i < sp.per; i++) {
-        const a = rand(TAU), r = rand(10, Math.min(W, H) * 0.12);
-        list.push(new Spirit(
-          cx + Math.cos(a) * r, cy + Math.sin(a) * r,
-          gi, key, color, sp.form
-        ));
-      }
+  /* ---- フォーメーションのヘルパー ---- */
+  function fitScale(pts, maxWpx, maxHpx) {
+    let aspect = 1;
+    for (let i = 0; i < pts.length; i += 2) {
+      const ax = Math.abs(pts[i]);
+      if (ax > aspect) aspect = ax;
     }
-    return list;
+    return Math.min(maxHpx / 2, maxWpx / (2 * aspect));
   }
 
-  function startLevel(n) {
-    level = n;
-    save(SAVE_LEVEL, n);
-    spec = levelSpec(n);
-    Background.init(spec.theme, W, H);
-    Particles.clear();
-    paths.clear();
-    lures = [];
-    hint = null;
-    idleT = 0;
-    bannerT = 0;
-    assist.clear();
-
-    // 惑星をだ円状に配置（縦横どちらでもきれいに並ぶ）
-    planets = [];
-    const k = spec.colors.length;
-    const a0 = rand(TAU);
-    for (let i = 0; i < k; i++) {
-      const a = a0 + i * TAU / k;
-      const nx = clamp(0.5 + 0.36 * Math.cos(a), 0.12, 0.88);
-      const ny = clamp(0.5 + 0.36 * Math.sin(a), 0.14, 0.86);
-      const key = spec.colors[i];
-      const pl = new Planet(nx, ny, key, PALETTE[key], spec.per, i * 2 + (n % 3));
-      pl.layout(W, H);
-      pl.onBloom = onPlanetBloom;
-      planets.push(pl);
-    }
-    spirits = makeSpirits(spec);
-
-    // はじめて出会う姿なら、お披露目
-    const seen = load(SAVE_FORMS, '').split(',').filter(Boolean);
-    if (!seen.includes(spec.form)) {
-      seen.push(spec.form);
-      save(SAVE_FORMS, seen.join(','));
-      intro = {
-        form: spec.form,
-        color: PALETTE[spec.colors[0]],
-        name: FORM_NAMES[spec.form] || '',
-        t: 0,
-        dummy: new Spirit(0, 0, 0, spec.colors[0], PALETTE[spec.colors[0]], spec.form)
-      };
-      AudioSys.fanfare();
-    }
-    mode = 'play';
+  function spawnText(text, cx, cy, maxWr, maxHr, hold, maxPts) {
+    const pts = Formations.sampleText(text, maxPts || 1600);
+    if (!pts) return null;
+    const sc = fitScale(pts, W * maxWr, H * maxHr);
+    const f = Formations.start(sim, {
+      pts,
+      cx: clamp(cx, sc * 2, W - sc * 2),
+      cy: clamp(cy, sc * 1.2, H - sc * 1.2),
+      scale: sc, hold
+    });
+    if (f) AudioSys.formationChord();
+    return f;
   }
 
-  function onPlanetBloom(pl) {
-    Particles.emoji(pl.x, pl.y - pl.r * 1.4, pick(['🌸', '🌟', '💮', '✨']));
+  function spawnShape(name, cx, cy, scale, hold, drift) {
+    const pts = Formations.sampleShape(name, 1400);
+    if (!pts) return null;
+    const f = Formations.start(sim, {
+      pts, cx, cy, scale, hold,
+      driftX: drift ? drift.x : 0,
+      driftY: drift ? drift.y : 0,
+      flipX: drift ? drift.x < 0 : false
+    });
+    if (f) AudioSys.formationChord();
+    return f;
   }
 
-  function themeColors() {
-    return spec ? spec.colors.map(c => PALETTE[c]) : ['#ff8fb4', '#7db8ff', '#ffd76e'];
-  }
-
-  /* ---- タイトル画面のデモ用スピリット ---- */
-  function makeTitleDemo() {
-    spirits = [];
-    const keys = ['pink', 'teal', 'yellow', 'purple'];
-    const forms = ['spirit', 'butterfly', 'fish', 'star'];
-    for (let gi = 0; gi < 4; gi++) {
-      for (let i = 0; i < 9; i++) {
-        spirits.push(new Spirit(
-          rand(W * 0.2, W * 0.8), rand(H * 0.2, H * 0.8),
-          gi, keys[gi], PALETTE[keys[gi]], forms[gi]
-        ));
-      }
-    }
-    planets = [];
-    lures = [];
-  }
+  const TAP_SYMBOLS = ['heart', 'star', 'flower', 'rainbow'];
+  const ANIMALS = ['whale', 'butterfly', 'bird', 'dragon'];
 
   /* ---- 入力 ---- */
-  function xyFromEvent(e) {
-    return { x: e.clientX, y: e.clientY };
-  }
-
   function onDown(id, x, y) {
     AudioSys.unlock();
     idleT = 0;
     hint = null;
-
-    if (mode === 'title') {
+    if (state === 'title') {
+      if (!nameModal.classList.contains('hidden')) return;
       startGame();
       return;
     }
-    if (mode === 'celebrate' || mode === 'fade') {
-      // おまつり中はどこを触っても花火！
-      Particles.firework(x, y, pick(themeColors()));
-      Particles.emoji(x, y, pick(['🎉', '⭐', '💖', '🌈', '🌟']));
-      AudioSys.chime(randInt(4, 10), { gain: 0.14 });
-      return;
-    }
-    const p = {
-      pts: [{ x, y }],
-      drawing: true, done: false, alive: true,
-      fade: 0, t0: performance.now(),
-      moved: 0, lastX: x, lastY: y
-    };
-    paths.set(id, p);
-    assignFollowers(p, x, y, 95);
-    Particles.ring(x, y, '#ffffff', 6);
+    touches.set(id, { x, y, sx: x, sy: y, age: 0, moved: 0, river: null, longFired: false });
   }
 
   function onMove(id, x, y) {
-    const p = paths.get(id);
-    if (!p || !p.drawing) return;
-    const dx = x - p.lastX, dy = y - p.lastY;
-    const d = Math.hypot(dx, dy);
-    p.moved += d;
-    if (d >= 12 && p.pts.length < 320) {
-      p.pts.push({ x, y });
-      p.lastX = x;
-      p.lastY = y;
-      assignFollowers(p, x, y, 65);
-      if (Math.random() < 0.45) {
-        Particles.spawn({
-          x: x + rand(-6, 6), y: y + rand(-6, 6),
-          vx: rand(-25, 25), vy: rand(-25, 25),
-          life: rand(0.4, 0.8), color: '#ffffff',
-          size: rand(1.8, 3.2), type: 'spark', drag: 0.94
-        });
+    const tc = touches.get(id);
+    if (!tc) return;
+    tc.moved += Math.hypot(x - tc.x, y - tc.y);
+    tc.x = x; tc.y = y;
+    if (!tc.river && tc.moved > 16) {
+      // 光の川をつくる（3本まで・古いものから溶ける）
+      while (rivers.filter(r => !r.evicted).length >= 3) {
+        const old = rivers.find(r => !r.evicted);
+        if (!old) break;
+        old.evicted = true;
       }
-      AudioSys.sparkleTick(y / H);
+      tc.river = { pts: [], age: 0, alpha: 1, evicted: false, lastX: tc.sx, lastY: tc.sy };
+      addRiverPt(tc.river, tc.sx, tc.sy);
+      rivers.push(tc.river);
     }
+    if (tc.river) {
+      const rv = tc.river;
+      const d = Math.hypot(x - rv.lastX, y - rv.lastY);
+      if (d >= 14 && rv.pts.length < 240) {
+        addRiverPt(rv, x, y);
+        AudioSys.sparkleTick(y / H);
+      }
+    }
+  }
+
+  function addRiverPt(rv, x, y) {
+    let dx = x - rv.lastX, dy = y - rv.lastY;
+    const d = Math.hypot(dx, dy);
+    if (d > 0.001) { dx /= d; dy /= d; } else { dx = 1; dy = 0; }
+    rv.pts.push({ x, y, dx, dy });
+    if (rv.pts.length === 2) { rv.pts[0].dx = dx; rv.pts[0].dy = dy; }
+    rv.lastX = x; rv.lastY = y;
   }
 
   function onUp(id, x, y) {
-    const p = paths.get(id);
-    if (!p) return;
-    p.drawing = false;
-    p.done = true;
-    const dt = performance.now() - p.t0;
-    if (p.moved < 18 && dt < 350) {
-      // タップだった → 星くずを生む
-      paths.delete(id);
-      releaseFollowers(p);
-      handleTap(x, y);
-    }
-  }
-
-  function assignFollowers(p, x, y, R) {
-    const R2 = R * R;
-    for (const s of spirits) {
-      if (s.dead || s.absorbing || s.path) continue;
-      if (dist2(s.x, s.y, x, y) < R2) {
-        s.path = p;
-        s.pathIdx = Math.max(0, p.pts.length - 1);
+    const tc = touches.get(id);
+    touches.delete(id);
+    if (!tc || state === 'title') return;
+    if (!tc.river && !tc.longFired && tc.age < 0.35 && tc.moved < 16) {
+      // タップ
+      for (const pl of planets) {
+        if (dist2(x, y, pl.x, pl.y) < (pl.r + 20) * (pl.r + 20)) {
+          pl.pulse = 1;
+          AudioSys.planetVoice(pl.noteIdx);
+          return;
+        }
       }
+      pulses.push({ x, y, age: 0 });
+      AudioSys.twinkle();
     }
   }
 
-  function releaseFollowers(p) {
-    for (const s of spirits) {
-      if (s.path === p) s.path = null;
-    }
-  }
-
-  function handleTap(x, y) {
-    // 惑星タップ？
-    for (const pl of planets) {
-      if (dist2(x, y, pl.x, pl.y) < (pl.r + 16) * (pl.r + 16)) {
-        pl.poke();
-        return;
-      }
-    }
-    // 星くず（みんなが集まってくる）
-    lures.push({ x, y, t: 0, life: 1.7 });
-    Particles.burst(x, y, '#ffffff', 8, 110, 3);
-    Particles.ring(x, y, '#fff2a8', 8);
-    Particles.starPop(x, y);
-    AudioSys.twinkle();
-  }
-
-  /* Pointer Events（iOS 13+）、なければタッチにフォールバック */
   if (window.PointerEvent) {
-    canvas.addEventListener('pointerdown', e => {
-      e.preventDefault();
-      const p = xyFromEvent(e);
-      onDown(e.pointerId, p.x, p.y);
-    });
-    canvas.addEventListener('pointermove', e => {
-      e.preventDefault();
-      const p = xyFromEvent(e);
-      onMove(e.pointerId, p.x, p.y);
-    });
-    const up = e => {
-      e.preventDefault();
-      const p = xyFromEvent(e);
-      onUp(e.pointerId, p.x, p.y);
-    };
-    canvas.addEventListener('pointerup', up);
-    canvas.addEventListener('pointercancel', up);
+    glCanvas.addEventListener('pointerdown', e => { e.preventDefault(); onDown(e.pointerId, e.clientX, e.clientY); });
+    glCanvas.addEventListener('pointermove', e => { e.preventDefault(); onMove(e.pointerId, e.clientX, e.clientY); });
+    const up = e => { e.preventDefault(); onUp(e.pointerId, e.clientX, e.clientY); };
+    glCanvas.addEventListener('pointerup', up);
+    glCanvas.addEventListener('pointercancel', up);
   } else {
     const each = (e, fn) => {
       e.preventDefault();
       for (const t of e.changedTouches) fn(t.identifier, t.clientX, t.clientY);
     };
-    canvas.addEventListener('touchstart', e => each(e, onDown), { passive: false });
-    canvas.addEventListener('touchmove', e => each(e, onMove), { passive: false });
-    canvas.addEventListener('touchend', e => each(e, onUp), { passive: false });
-    canvas.addEventListener('touchcancel', e => each(e, onUp), { passive: false });
+    glCanvas.addEventListener('touchstart', e => each(e, onDown), { passive: false });
+    glCanvas.addEventListener('touchmove', e => each(e, onMove), { passive: false });
+    glCanvas.addEventListener('touchend', e => each(e, onUp), { passive: false });
+    glCanvas.addEventListener('touchcancel', e => each(e, onUp), { passive: false });
   }
-  // iOSのピンチズーム・ダブルタップズームを止める
-  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', e => { if (e.target === glCanvas) e.preventDefault(); }, { passive: false });
   document.addEventListener('gesturestart', e => e.preventDefault());
   document.addEventListener('dblclick', e => e.preventDefault());
-  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  glCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
-  /* ---- HUD ---- */
+  /* ---- HUD・なまえ ---- */
   muteBtn.addEventListener('click', () => {
     const m = !AudioSys.isMuted();
     AudioSys.setMuted(m);
@@ -314,385 +275,397 @@
   resetBtn.addEventListener('click', () => {
     stars = 0;
     save(SAVE_STARS, 0);
-    save(SAVE_LEVEL, 1);
+    save(SAVE_THEME, 0);
     updateStarBar();
-    if (mode !== 'title') startLevel(1);
+    if (state !== 'title') { state = 'play'; setupTheme(0, true); }
+  });
+  nameBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    nameInput.value = childName;
+    nameModal.classList.remove('hidden');
+    setTimeout(() => nameInput.focus(), 50);
+  });
+  nameSave.addEventListener('click', () => {
+    childName = nameInput.value.trim().slice(0, 6);
+    save(SAVE_NAME, childName);
+    nameModal.classList.add('hidden');
+    nameInput.blur();
+  });
+  nameSkip.addEventListener('click', () => {
+    nameModal.classList.add('hidden');
+    nameInput.blur();
   });
 
   function updateStarBar() {
-    if (stars <= 0) { starBarEl.textContent = ''; return; }
-    starBarEl.textContent = stars <= 8 ? '⭐'.repeat(stars) : '⭐×' + stars;
+    starBarEl.textContent = stars <= 0 ? '' : (stars <= 8 ? '⭐'.repeat(stars) : '⭐×' + stars);
   }
 
-  /* ---- ゲーム開始 ---- */
   function startGame() {
     titleEl.classList.add('hidden');
     hudEl.classList.add('visible');
+    frozenQuality = true;
     stars = parseInt(load(SAVE_STARS, '0'), 10) || 0;
     updateStarBar();
-    const saved = parseInt(load(SAVE_LEVEL, '1'), 10) || 1;
-    startLevel(saved);
+    state = 'play';
+    setupTheme(parseInt(load(SAVE_THEME, '0'), 10) || 0, true);
   }
 
-  /* ---- 毎フレームの更新 ---- */
+  /* ---- 更新 ---- */
   function update(dt, t) {
-    Background.update(dt, t, W, H);
-    Particles.update(dt);
-
-    if (mode === 'title') {
-      // デモ：中心のまわりを回る見えない星くずに群がる
-      const cx = W / 2 + Math.cos(t * 0.5) * W * 0.22;
-      const cy = H * 0.62 + Math.sin(t * 0.8) * H * 0.1;
-      lures = [{ x: cx, y: cy, t: 0, life: 1 }];
-      Flock.update(spirits, { W, H, planets: [], lures, assist }, dt, t);
-      return;
-    }
-
-    /* パスの寿命 */
-    for (const [id, p] of paths) {
-      if (!p.drawing) {
-        p.fade += dt;
-        if (p.fade >= PATH_FADE) {
-          p.alive = false;
-          releaseFollowers(p);
-          paths.delete(id);
-        }
+    // タッチの経過（長押しで形が咲く）
+    for (const tc of touches.values()) {
+      tc.age += dt;
+      if (!tc.river && !tc.longFired && tc.age > 1.5 && tc.moved < 16 &&
+          (state === 'play' || state === 'celebrate')) {
+        tc.longFired = true;
+        spawnShape(pick(TAP_SYMBOLS), tc.x, tc.y, Math.min(W, H) * rand(0.13, 0.18), 2.2);
       }
     }
-    /* 星くずの寿命 */
-    for (let i = lures.length - 1; i >= 0; i--) {
-      const l = lures[i];
-      l.t += dt;
-      if (l.t >= l.life) lures.splice(i, 1);
-      else if (Math.random() < dt * 14) {
-        Particles.spawn({
-          x: l.x + rand(-10, 10), y: l.y + rand(-10, 10),
-          vx: rand(-20, 20), vy: rand(-40, -10),
-          life: 0.5, color: '#fff2a8', size: rand(1.5, 3), type: 'spark'
-        });
-      }
+    // 川の寿命
+    for (let i = rivers.length - 1; i >= 0; i--) {
+      const rv = rivers[i];
+      rv.age += dt;
+      if (rv.evicted) rv.alpha = Math.max(0, rv.alpha - dt / 1.3);
+      else rv.alpha = rv.age < 22 ? 1 : Math.max(0, 1 - (rv.age - 22) / 18);
+      if (rv.alpha <= 0) rivers.splice(i, 1);
+    }
+    // 波紋
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      pulses[i].age += dt;
+      if (pulses[i].age > 0.95) pulses.splice(i, 1);
+    }
+    // オーロラ
+    for (let i = 0; i < 3; i++) {
+      const d = auroraDefs[i], a = auroras[i];
+      a.x = (d.nx + Math.sin(t * d.spx + d.ph) * d.ax) * W;
+      a.y = (d.ny + Math.cos(t * d.spy + d.ph) * d.ay) * H;
+      a.r = d.rf * Math.min(W, H) * (1 + Math.sin(t * 0.2 + d.ph) * 0.12);
+      a.intensity = 0.16 + Math.sin(t * 0.3 + d.ph) * 0.05;
+      a.colorF = d.colorF;
     }
 
-    /* おたすけ判定：のこりが少ない群れは惑星が強く引き寄せる */
-    if (mode === 'play') {
-      assist.clear();
-      const remain = new Map();
-      for (const s of spirits) {
-        if (!s.dead) remain.set(s.group, (remain.get(s.group) || 0) + 1);
+    /* 状態ごとの演出 */
+    if (state === 'title') {
+      titleFormT -= dt;
+      if (titleFormT <= 0) {
+        titleFormT = 8;
+        spawnShape(pick(['heart', 'star', 'flower']), W / 2, H * 0.62, Math.min(W, H) * 0.15, 2.4);
       }
-      for (const [g, c] of remain) {
-        if (c <= 4) assist.add(g);
+    } else if (state === 'play') {
+      bannerT += dt;
+      // ときどき、群れが大きな生き物になって泳いでいく
+      animalT -= dt;
+      if (animalT <= 0) {
+        animalT = rand(45, 80);
+        const fromLeft = Math.random() < 0.5;
+        const sc = Math.min(W, H) * rand(0.18, 0.24);
+        spawnShape(pick(ANIMALS),
+          fromLeft ? -sc * 2 : W + sc * 2,
+          H * rand(0.22, 0.5), sc, 999,
+          { x: fromLeft ? rand(42, 66) : -rand(42, 66), y: 0 });
       }
-    }
-
-    Flock.update(spirits, { W, H, planets, lures, assist }, dt, t);
-    for (const pl of planets) pl.update(dt, t);
-
-    if (intro) {
-      intro.t += dt;
-      intro.dummy.phase += dt * 9;
-      if (intro.t > 2.8) intro = null;
-    }
-    bannerT += dt;
-
-    if (mode === 'play') {
-      /* ヒント（しばらく触っていないとき、光る指が道を教えてくれる） */
-      const anyDrawing = [...paths.values()].some(p => p.drawing);
-      if (!anyDrawing) idleT += dt; else idleT = 0;
-      if (idleT > 10 && !hint) {
-        const target = planets.find(p => !p.done);
-        if (target) {
-          let sx = 0, sy = 0, c = 0;
-          for (const s of spirits) {
-            if (!s.dead && !s.absorbing && s.colorKey === target.colorKey) {
-              sx += s.x; sy += s.y; c++;
-            }
-          }
-          if (c > 0) {
-            sx /= c; sy /= c;
-            const mx = (sx + target.x) / 2, my = (sy + target.y) / 2;
-            const dx = target.x - sx, dy = target.y - sy;
-            const dl = Math.hypot(dx, dy) || 1;
-            hint = {
-              sx, sy, tx: target.x, ty: target.y,
-              cx: mx - dy / dl * 90, cy: my + dx / dl * 90,
-              t: 0
-            };
-          }
-        }
-      }
-      if (hint) {
-        hint.t += dt / 2.4;
-        if (hint.t > 1.25) hint.t = 0;
-      }
-
-      /* クリア判定 */
-      if (planets.length && planets.every(p => p.done)) {
-        mode = 'celebrate';
-        celebrateT = 0;
-        fwTimer = 0;
-        emojiTimer = 0;
+      // ヒント
+      if (touches.size === 0) idleT += dt; else idleT = 0;
+      if (idleT > 12 && !hint) makeHint();
+      if (hint) { hint.t += dt / 2.4; if (hint.t > 1.3) hint.t = 0; }
+      // ぜんぶ満ちた？
+      if (planets.length && planets.every(p => p.full)) {
+        state = 'celebrate';
+        ct = 0; celebrateStep = 0; fireworkT = 0;
         stars++;
         save(SAVE_STARS, stars);
         updateStarBar();
         AudioSys.fanfare();
         hint = null;
       }
-    } else if (mode === 'celebrate') {
-      celebrateT += dt;
-      fwTimer -= dt;
-      if (fwTimer <= 0) {
-        fwTimer = rand(0.35, 0.6);
-        Particles.firework(rand(W * 0.15, W * 0.85), rand(H * 0.12, H * 0.55), pick(themeColors()));
-        if (Math.random() < 0.5) AudioSys.chime(randInt(4, 11), { gain: 0.07 });
+    } else if (state === 'celebrate') {
+      ct += dt;
+      fireworkT -= dt;
+      if (fireworkT <= 0) {
+        fireworkT = rand(0.4, 0.7);
+        pulses.push({ x: rand(W * 0.15, W * 0.85), y: rand(H * 0.15, H * 0.6), age: 0 });
+        AudioSys.chime(randInt(4, 11), { gain: 0.08 });
       }
-      emojiTimer -= dt;
-      if (emojiTimer <= 0) {
-        emojiTimer = rand(0.25, 0.5);
-        Particles.emoji(rand(W * 0.1, W * 0.9), H + 20, pick(['🎉', '⭐', '🌟', '💖', '🌈', '✨']));
+      if (celebrateStep === 0 && ct > 0.8) {
+        celebrateStep = 1;
+        spawnText('やったね', W / 2, H * 0.42, 0.92, 0.3, 2.6, 2000);
       }
-      if (celebrateT > 4.6) {
-        mode = 'fade';
-        fadeDir = 1;
-        fadeT = 0;
+      if (celebrateStep === 1 && childName && ct > 4.6) {
+        celebrateStep = 2;
+        spawnText(childName, W / 2, H * 0.42, 0.92, 0.3, 2.6, 2000);
       }
-    } else if (mode === 'fade') {
-      fadeT += dt / 0.7;
-      if (fadeDir === 1 && fadeT >= 1) {
-        startLevel(level + 1);
-        mode = 'fade';
-        fadeDir = 2;
-        fadeT = 0;
-      } else if (fadeDir === 2 && fadeT >= 1) {
-        mode = 'play';
+      const endT = childName ? 8.6 : 5.4;
+      if (ct > endT) { state = 'transition'; fadeDir = 1; }
+    } else if (state === 'transition') {
+      fadeA += fadeDir * dt / 0.8;
+      if (fadeDir === 1 && fadeA >= 1) {
+        fadeA = 1; fadeDir = -1;
+        setupTheme(themeIdx + 1, true);
+      } else if (fadeDir === -1 && fadeA <= 0) {
+        fadeA = 0;
+        state = 'play';
       }
     }
+
+    /* 惑星の顔まわり */
+    for (const pl of planets) {
+      pl.pulse = Math.max(0, pl.pulse - dt * 2.2);
+      pl.blinkT -= dt;
+      if (pl.blinkT <= 0) { pl.blink = 0.16; pl.blinkT = rand(1.8, 4.5); }
+      if (pl.blink > 0) pl.blink -= dt;
+    }
+
+    /* シミュレーション本体 */
+    const env = {
+      species: theme.species,
+      touches: [...touches.values()],
+      rivers, pulses, planets,
+      events: sim.events
+    };
+    sim.step(dt, t, env);
+    Formations.update(sim, dt, t, W, H);
+
+    /* イベント処理 */
+    if (sim.events.length) {
+      for (const ev of sim.events) {
+        if (ev.type === 'capture') {
+          const pl = planets[ev.planet];
+          if (!pl) continue;
+          pl.pulse = Math.max(pl.pulse, 0.6);
+          AudioSys.absorb(pl.captured / pl.quota);
+          if (!pl.full && pl.captured >= pl.quota) {
+            pl.full = true;
+            fullPlanets++;
+            AudioSys.bloom(pl.noteIdx);
+            // 数字のフォーメーション（1, 2, 3…）
+            const dx = W / 2 - pl.x, dy = H / 2 - pl.y;
+            const dl = Math.hypot(dx, dy) || 1;
+            const off = Math.min(W, H) * 0.24;
+            spawnText(String(fullPlanets),
+              pl.x + dx / dl * off, pl.y + dy / dl * off,
+              0.4, 0.3, 2.0, 900);
+          }
+        }
+      }
+      sim.events.length = 0;
+    }
+
+    // 群れの活発さに応じたきらめき音
+    AudioSys.shimmer(Math.min(0.5, rivers.length * 0.14 + touches.size * 0.18));
+  }
+
+  function makeHint() {
+    const target = planets.find(p => !p.full);
+    if (!target) return;
+    let sx = 0, sy = 0, c = 0;
+    for (let i = sim.dustN; i < sim.n; i++) {
+      if (sim.mode[i] === 0 && sim.spec[i] === target.specIdx) {
+        sx += sim.px[i]; sy += sim.py[i]; c++;
+      }
+    }
+    if (c < 20) return;
+    sx /= c; sy /= c;
+    const mx = (sx + target.x) / 2, my = (sy + target.y) / 2;
+    const dx = target.x - sx, dy = target.y - sy;
+    const dl = Math.hypot(dx, dy) || 1;
+    hint = { sx, sy, tx: target.x, ty: target.y, cx: mx - dy / dl * 90, cy: my + dx / dl * 90, t: 0 };
   }
 
   /* ---- 描画 ---- */
-  function bez(p0x, p0y, cx, cy, p1x, p1y, t) {
-    const u = 1 - t;
-    return {
-      x: u * u * p0x + 2 * u * t * cx + t * t * p1x,
-      y: u * u * p0y + 2 * u * t * cy + t * t * p1y
-    };
-  }
-
-  function drawPaths(g, t) {
-    g.save();
-    g.globalCompositeOperation = 'lighter';
-    g.lineCap = 'round';
-    g.lineJoin = 'round';
-    for (const p of paths.values()) {
-      if (p.pts.length < 2) continue;
-      const alpha = p.drawing ? 1 : Math.max(0, 1 - p.fade / PATH_FADE);
-      // 太いほのかな光
-      g.globalAlpha = alpha * 0.25;
-      g.strokeStyle = '#ffffff';
-      g.lineWidth = 14;
-      g.beginPath();
-      g.moveTo(p.pts[0].x, p.pts[0].y);
-      for (let i = 1; i < p.pts.length; i++) g.lineTo(p.pts[i].x, p.pts[i].y);
-      g.stroke();
-      // 細い明るい芯
-      g.globalAlpha = alpha * 0.8;
-      g.lineWidth = 3;
-      g.stroke();
-      // 流れるきらめき
-      const off = (t * 6) % 1;
-      g.fillStyle = '#ffffff';
-      for (let i = 0; i < p.pts.length; i += 4) {
-        const j = Math.floor(i + off * 4) % p.pts.length;
-        const pt = p.pts[j];
-        g.globalAlpha = alpha * 0.7;
-        g.beginPath();
-        g.arc(pt.x, pt.y, 1.8, 0, TAU);
-        g.fill();
-      }
-      // 指の下の光
-      if (p.drawing) {
-        const e = p.pts[p.pts.length - 1];
-        g.globalAlpha = 0.8;
-        g.drawImage(Glow.get('#ffffff'), e.x - 24, e.y - 24, 48, 48);
+  function pushExtras(t) {
+    // 惑星の光の核（本体も光でできている）
+    for (const pl of planets) {
+      const [r, g, b] = pl.colorF;
+      const breathe = 1 + Math.sin(t * 1.5 + pl.noteIdx) * 0.04 + pl.pulse * 0.2;
+      const rr = pl.r * breathe;
+      sim.appendExtra(pl.x, pl.y, rr * 3.6, r * 0.16, g * 0.16, b * 0.16);
+      sim.appendExtra(pl.x, pl.y, rr * 1.9, r * 0.5, g * 0.5, b * 0.5);
+      sim.appendExtra(pl.x, pl.y, rr * 1.05, Math.min(1, r * 0.75 + 0.4), Math.min(1, g * 0.75 + 0.4), Math.min(1, b * 0.75 + 0.4));
+      if (pl.full) {
+        sim.appendExtra(pl.x, pl.y, rr * (4.6 + Math.sin(t * 2.2) * 0.5), r * 0.12, g * 0.12, b * 0.12);
       }
     }
-    g.restore();
-    g.globalAlpha = 1;
-  }
-
-  function drawHint(g, t) {
-    if (!hint) return;
-    const k = Math.min(1, hint.t);
-    g.save();
-    g.globalCompositeOperation = 'lighter';
-    // 点線の道すじ
-    g.setLineDash([4, 10]);
-    g.strokeStyle = 'rgba(255,255,255,0.45)';
-    g.lineWidth = 3;
-    g.beginPath();
-    g.moveTo(hint.sx, hint.sy);
-    const steps = Math.max(2, Math.floor(24 * k));
-    for (let i = 1; i <= steps; i++) {
-      const pt = bez(hint.sx, hint.sy, hint.cx, hint.cy, hint.tx, hint.ty, (i / 24));
-      g.lineTo(pt.x, pt.y);
+    // 指の下の光
+    for (const tc of touches.values()) {
+      sim.appendExtra(tc.x, tc.y, 60, 0.5, 0.48, 0.55);
     }
-    g.stroke();
-    g.setLineDash([]);
-    // スタート地点のリング
-    const pr = 16 + Math.sin(t * 5) * 4;
-    g.strokeStyle = 'rgba(255,255,255,0.8)';
-    g.lineWidth = 3;
-    g.beginPath();
-    g.arc(hint.sx, hint.sy, pr, 0, TAU);
-    g.stroke();
-    // 光る指
-    const fp = bez(hint.sx, hint.sy, hint.cx, hint.cy, hint.tx, hint.ty, k);
-    g.drawImage(Glow.get('#ffffff'), fp.x - 26, fp.y - 26, 52, 52);
-    g.fillStyle = 'rgba(255,255,255,0.95)';
-    g.beginPath();
-    g.arc(fp.x, fp.y, 7, 0, TAU);
-    g.fill();
-    g.restore();
-  }
-
-  function drawIntro(g, t) {
-    if (!intro) return;
-    const k = intro.t < 0.4 ? intro.t / 0.4
-            : intro.t > 2.3 ? Math.max(0, 1 - (intro.t - 2.3) / 0.5)
-            : 1;
-    const cx = W / 2, cy = H * 0.42;
-    g.save();
-    g.globalAlpha = k;
-    // うしろの光
-    g.globalCompositeOperation = 'lighter';
-    const gs = 260 + Math.sin(t * 3) * 20;
-    g.drawImage(Glow.get(intro.color), cx - gs / 2, cy - gs / 2, gs, gs);
-    g.globalCompositeOperation = 'source-over';
-    // おおきくなったなかま
-    const d = intro.dummy;
-    d.x = 0; d.y = 0;
-    const wob = Math.sin(intro.t * 2.5) * 0.35;
-    d.vx = Math.cos(wob);
-    d.vy = Math.sin(wob);
-    g.save();
-    g.translate(cx, cy + Math.sin(t * 2.2) * 8);
-    g.scale(4.4, 4.4);
-    Flock.drawForm(g, d, t);
-    g.restore();
-    // なまえ
-    g.fillStyle = '#ffffff';
-    g.textAlign = 'center';
-    g.font = '700 ' + Math.round(clamp(W * 0.055, 18, 30)) + 'px -apple-system, "Hiragino Maru Gothic ProN", sans-serif';
-    g.shadowColor = 'rgba(255,150,220,0.9)';
-    g.shadowBlur = 12;
-    g.fillText('あたらしい なかま！', cx, cy + 95);
-    g.font = '800 ' + Math.round(clamp(W * 0.075, 24, 42)) + 'px -apple-system, "Hiragino Maru Gothic ProN", sans-serif';
-    g.fillText(intro.name, cx, cy + 145);
-    g.restore();
-    g.shadowBlur = 0;
-    g.globalAlpha = 1;
-  }
-
-  function drawBanner(g) {
-    if (!spec || bannerT > 3 || intro) return;
-    const k = bannerT < 0.5 ? bannerT / 0.5
-            : bannerT > 2.4 ? Math.max(0, 1 - (bannerT - 2.4) / 0.6)
-            : 1;
-    g.save();
-    g.globalAlpha = k * 0.95;
-    g.fillStyle = '#ffffff';
-    g.textAlign = 'center';
-    g.shadowColor = 'rgba(120,80,200,0.8)';
-    g.shadowBlur = 14;
-    g.font = '800 ' + Math.round(clamp(W * 0.07, 22, 40)) + 'px -apple-system, "Hiragino Maru Gothic ProN", sans-serif';
-    g.fillText(spec.theme.name, W / 2, H * 0.16);
-    g.font = '600 ' + Math.round(clamp(W * 0.035, 13, 20)) + 'px -apple-system, sans-serif';
-    g.fillText('ゆめ ' + level, W / 2, H * 0.16 + 30);
-    g.restore();
-    g.shadowBlur = 0;
-  }
-
-  function drawCelebrate(g, t) {
-    if (mode !== 'celebrate') return;
-    const k = Math.min(1, celebrateT / 0.8);
-    // にじ
-    g.save();
-    g.globalCompositeOperation = 'lighter';
-    const rainbow = ['#ff6b8a', '#ffab70', '#ffd76e', '#a5e878', '#7db8ff', '#c9a2ff'];
-    const cx = W / 2, cy = H * 1.05;
-    const baseR = Math.min(W, H) * 0.75;
-    for (let i = 0; i < rainbow.length; i++) {
-      g.globalAlpha = 0.22 * k;
-      g.strokeStyle = rainbow[i];
-      g.lineWidth = Math.min(W, H) * 0.035;
-      g.beginPath();
-      g.arc(cx, cy, baseR + i * g.lineWidth, Math.PI, 0);
-      g.stroke();
+    // 川の先端のきらめき
+    for (const rv of rivers) {
+      if (rv.alpha > 0.5 && rv.pts.length) {
+        const p = rv.pts[rv.pts.length - 1];
+        sim.appendExtra(p.x, p.y, 34, 0.4 * rv.alpha, 0.4 * rv.alpha, 0.45 * rv.alpha);
+      }
     }
-    g.restore();
-    // メッセージ
-    g.save();
-    g.globalAlpha = k;
-    g.textAlign = 'center';
-    g.fillStyle = '#ffffff';
-    g.shadowColor = 'rgba(255,180,80,0.9)';
-    g.shadowBlur = 16;
-    const bounce = 1 + Math.sin(t * 6) * 0.06;
-    g.font = '900 ' + Math.round(clamp(W * 0.11, 34, 64) * bounce) + 'px -apple-system, "Hiragino Maru Gothic ProN", sans-serif';
-    g.fillText('やったね！', W / 2, H * 0.38);
-    g.restore();
-    g.shadowBlur = 0;
-    g.globalAlpha = 1;
+    // 波紋のリング光
+    for (const pu of pulses) {
+      const k = 1 - pu.age / 0.95;
+      sim.appendExtra(pu.x, pu.y, 30 + pu.age * 300, 0.3 * k, 0.28 * k, 0.34 * k);
+    }
   }
 
-  function draw(t) {
-    Background.draw(ctx, t, W, H);
-    drawPaths(ctx, t);
+  function bez(p0x, p0y, cx, cy, p1x, p1y, tt) {
+    const u = 1 - tt;
+    return { x: u * u * p0x + 2 * u * tt * cx + tt * tt * p1x, y: u * u * p0y + 2 * u * tt * cy + tt * tt * p1y };
+  }
 
-    // 星くずの光
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const l of lures) {
-      const k = 1 - l.t / l.life;
-      const gs = 70 * k + 20;
-      ctx.globalAlpha = k * 0.9;
-      ctx.drawImage(Glow.get('#fff2a8'), l.x - gs / 2, l.y - gs / 2, gs, gs);
+  function drawOverlay(t) {
+    fx.clearRect(0, 0, W, H);
+
+    /* 惑星の顔と進みぐあい */
+    for (const pl of planets) {
+      const r = pl.r * (1 + pl.pulse * 0.1);
+      const prog = Math.min(1, pl.captured / pl.quota);
+      // 進みぐあいの細いリング
+      fx.lineCap = 'round';
+      fx.strokeStyle = 'rgba(255,255,255,0.22)';
+      fx.lineWidth = 3;
+      fx.beginPath();
+      fx.arc(pl.x, pl.y, r + 9, 0, TAU);
+      fx.stroke();
+      if (prog > 0) {
+        fx.strokeStyle = 'rgba(255,255,255,' + (0.7 + pl.pulse * 0.3) + ')';
+        fx.lineWidth = 3.5;
+        fx.beginPath();
+        fx.arc(pl.x, pl.y, r + 9, -Math.PI / 2, -Math.PI / 2 + prog * TAU);
+        fx.stroke();
+      }
+      // かお
+      const ex = r * 0.3, ey = -r * 0.1, er = r * 0.09;
+      fx.strokeStyle = 'rgba(40,30,55,0.75)';
+      fx.fillStyle = 'rgba(40,30,55,0.75)';
+      fx.lineWidth = Math.max(2, r * 0.055);
+      if (pl.full || pl.blink > 0) {
+        for (const sd of [-1, 1]) {
+          fx.beginPath();
+          fx.arc(pl.x + sd * ex, pl.y + ey + er * 0.5, er * 1.1, Math.PI * 1.15, Math.PI * 1.85);
+          fx.stroke();
+        }
+      } else {
+        for (const sd of [-1, 1]) {
+          fx.beginPath();
+          fx.arc(pl.x + sd * ex, pl.y + ey, er, 0, TAU);
+          fx.fill();
+        }
+      }
+      const smile = 0.3 + prog * 0.7;
+      fx.beginPath();
+      fx.arc(pl.x, pl.y + r * 0.13, r * 0.38 * smile + r * 0.06,
+             Math.PI * (0.5 - 0.34 * smile), Math.PI * (0.5 + 0.34 * smile));
+      fx.stroke();
+      if (prog > 0.35) {
+        fx.fillStyle = 'rgba(255,120,150,' + (0.2 + pl.pulse * 0.2) + ')';
+        for (const sd of [-1, 1]) {
+          fx.beginPath();
+          fx.arc(pl.x + sd * r * 0.52, pl.y + r * 0.17, r * 0.12, 0, TAU);
+          fx.fill();
+        }
+      }
     }
-    ctx.restore();
-    ctx.globalAlpha = 1;
 
-    for (const pl of planets) pl.draw(ctx, t);
-    Flock.draw(ctx, spirits, t);
-    Particles.draw(ctx);
-    drawHint(ctx, t);
-    drawBanner(ctx);
-    drawCelebrate(ctx, t);
-    drawIntro(ctx, t);
+    /* ヒント（光る指のお手本） */
+    if (hint) {
+      const k = Math.min(1, hint.t);
+      fx.save();
+      fx.setLineDash([4, 11]);
+      fx.strokeStyle = 'rgba(255,255,255,0.4)';
+      fx.lineWidth = 3;
+      fx.beginPath();
+      fx.moveTo(hint.sx, hint.sy);
+      const steps = Math.max(2, Math.floor(24 * k));
+      for (let i = 1; i <= steps; i++) {
+        const p = bez(hint.sx, hint.sy, hint.cx, hint.cy, hint.tx, hint.ty, i / 24);
+        fx.lineTo(p.x, p.y);
+      }
+      fx.stroke();
+      fx.setLineDash([]);
+      const fp = bez(hint.sx, hint.sy, hint.cx, hint.cy, hint.tx, hint.ty, k);
+      const rg = fx.createRadialGradient(fp.x, fp.y, 0, fp.x, fp.y, 26);
+      rg.addColorStop(0, 'rgba(255,255,255,0.9)');
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
+      fx.fillStyle = rg;
+      fx.beginPath(); fx.arc(fp.x, fp.y, 26, 0, TAU); fx.fill();
+      fx.restore();
+    }
 
-    // フェード
-    if (mode === 'fade') {
-      const a = fadeDir === 1 ? Math.min(1, fadeT) : Math.max(0, 1 - fadeT);
-      ctx.fillStyle = 'rgba(8,4,24,' + a + ')';
-      ctx.fillRect(0, 0, W, H);
+    /* テーマ名バナー */
+    if (state === 'play' && bannerT < 3.2) {
+      const k = bannerT < 0.5 ? bannerT / 0.5 : bannerT > 2.5 ? Math.max(0, 1 - (bannerT - 2.5) / 0.7) : 1;
+      fx.save();
+      fx.globalAlpha = k * 0.9;
+      fx.fillStyle = '#ffffff';
+      fx.textAlign = 'center';
+      fx.shadowColor = 'rgba(140,90,220,0.9)';
+      fx.shadowBlur = 12;
+      fx.font = '800 ' + Math.round(clamp(W * 0.055, 18, 34)) + 'px -apple-system, "Hiragino Maru Gothic ProN", sans-serif';
+      fx.fillText(theme.name, W / 2, H * 0.12);
+      fx.restore();
+    }
+
+    /* 場面転換のフェード */
+    if (state === 'transition' && fadeA > 0) {
+      fx.fillStyle = 'rgba(6,3,20,' + Math.min(1, fadeA) + ')';
+      fx.fillRect(0, 0, W, H);
+    }
+  }
+
+  /* ---- 画質の自動調整（タイトル画面のあいだに計測） ---- */
+  function adaptQuality(dtMs) {
+    if (frozenQuality || !isGL) return;
+    frameAcc += dtMs;
+    frameCnt++;
+    if (frameCnt >= 45) {
+      const avg = frameAcc / frameCnt;
+      frameAcc = 0; frameCnt = 0;
+      let newN = N;
+      if (avg > 20) newN = Math.max(3500, Math.round(N * 0.72));
+      else if (avg < 11.5) newN = Math.min(MAXN, Math.round(N * 1.18));
+      if (newN !== N) {
+        N = newN;
+        setupTheme(themeIdx, true);
+      }
     }
   }
 
   /* ---- メインループ ---- */
   function loop(now) {
     requestAnimationFrame(loop);
-    let dt = (now - lastNow) / 1000;
+    const rawDt = now - lastNow;
     lastNow = now;
-    if (dt > 0.05) dt = 0.05;   // タブ復帰時などの暴走防止
+    let dt = rawDt / 1000;
+    if (dt > 0.05) dt = 0.05;
+    if (dt <= 0) return;
     elapsed += dt;
+
     update(dt, elapsed);
-    draw(elapsed);
+
+    sim.fillVerts(elapsed);
+    pushExtras(elapsed);
+    renderer.render({
+      verts: sim.verts,
+      count: sim.vertCount,
+      theme, auroras, t: elapsed,
+      decay: 0.90
+    });
+    drawOverlay(elapsed);
+    adaptQuality(rawDt);
   }
+
+  /* 動作確認用の小さなフック（ゲームには影響しない） */
+  window.__hikari = {
+    sim,
+    get state() { return state; },
+    get N() { return N; },
+    get isGL() { return isGL; },
+    get planets() { return planets; },
+    get rivers() { return rivers; },
+    formationCount: () => Formations.count(),
+    testText: (s) => spawnText(s, W / 2, H * 0.42, 0.92, 0.3, 3.0, 1800),
+    testShape: (n) => spawnShape(n, W / 2, H * 0.45, Math.min(W, H) * 0.2, 3.0)
+  };
 
   /* ---- 起動 ---- */
   resize();
-  makeTitleDemo();
-  requestAnimationFrame(now => {
-    lastNow = now;
-    requestAnimationFrame(loop);
-  });
+  setupTheme(parseInt(load(SAVE_THEME, '0'), 10) || 0, true);
+  state = 'title';
+  requestAnimationFrame(now => { lastNow = now; requestAnimationFrame(loop); });
 })();

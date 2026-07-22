@@ -12,6 +12,8 @@ const AudioSys = (() => {
   let ambientTimer = null;
   let lastBoing = 0;
   let lastTick = 0;
+  let lastAbsorb = 0;
+  let lastShimmer = 0;
 
   // ド レ ミ ソ ラ のペンタトニック（2オクターブ半）
   const PENTA = [261.63, 293.66, 329.63, 392.00, 440.00,
@@ -103,9 +105,31 @@ const AudioSys = (() => {
     tone({ freq: 320, freqTo: 160, dur: 0.22, gain: 0.09, type: 'sine' });
   }
 
-  /* 星の子を吸い込んだとき（進み具合で音が上がる） */
-  function absorb(step) {
-    chime(3 + step, { gain: 0.13, dur: 0.5 });
+  /* 粒子が惑星に吸い込まれたとき（満ちるほど音が上がる・連発は間引く） */
+  function absorb(ratio) {
+    if (!ctx || muted) return;
+    const now2 = ctx.currentTime;
+    if (now2 - lastAbsorb < 0.085) return;
+    lastAbsorb = now2;
+    chime(3 + Math.round(ratio * 8), { gain: 0.10, dur: 0.45 });
+  }
+
+  /* 群れの活発さに応じたきらめき（毎フレーム呼んでよい・内部で間引く） */
+  function shimmer(activity) {
+    if (!ctx || muted || activity <= 0) return;
+    const now2 = ctx.currentTime;
+    if (now2 - lastShimmer < 0.16) return;
+    if (Math.random() > activity) return;
+    lastShimmer = now2;
+    tone({ freq: PENTA[randInt(5, 12)] * 2, dur: 0.22, gain: 0.028 });
+  }
+
+  /* フォーメーションが形になった瞬間のやわらかい和音 */
+  function formationChord() {
+    const root = randInt(0, 4);
+    chime(root, { gain: 0.13, dur: 1.2 });
+    chime(root + 2, { gain: 0.11, dur: 1.2, delay: 0.05 });
+    chime(root + 4, { gain: 0.11, dur: 1.4, delay: 0.1 });
   }
 
   /* 惑星をタップしたときの声（惑星ごとに音がちがう） */
@@ -155,7 +179,7 @@ const AudioSys = (() => {
 
   return {
     unlock, setMuted, isMuted,
-    chime, sparkleTick, boing, absorb,
+    chime, sparkleTick, boing, absorb, shimmer, formationChord,
     planetVoice, bloom, fanfare, twinkle
   };
 })();

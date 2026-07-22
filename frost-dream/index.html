@@ -13,15 +13,29 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<canvas id="game"></canvas>
+<canvas id="gl"></canvas>
+<canvas id="fx"></canvas>
 
 <!-- タイトル画面オーバーレイ -->
 <div id="title">
   <div class="title-inner">
     <h1><span>ひ</span><span>か</span><span>り</span><span>の</span><span>た</span><span>び</span></h1>
     <p class="subtitle">〜 ゆめの フロック 〜</p>
-    <p class="howto">ゆびで みちを かいて<br>ひかりのこどもたちを<br>おなじいろの ほしへ とどけよう</p>
+    <p class="howto">ゆびで ひかりの かわを かくと<br>なんぜんもの ひかりのこどもが<br>ながれて あそびに くるよ</p>
     <div id="startBtn">▶ タップして はじめる</div>
+    <button id="nameBtn">👶 なまえを おしえる</button>
+  </div>
+</div>
+
+<!-- なまえ設定モーダル -->
+<div id="nameModal" class="hidden">
+  <div class="modal-card">
+    <p>こどもの なまえ（ひらがな）<br><small>とくべつな しゅんかんに ひかりが なまえを かくよ</small></p>
+    <input id="nameInput" type="text" maxlength="6" placeholder="れい：はな" autocomplete="off">
+    <div class="modal-btns">
+      <button id="nameSave">きめた！</button>
+      <button id="nameSkip">あとで</button>
+    </div>
   </div>
 </div>
 
@@ -36,10 +50,10 @@
 
 <script src="js/util.js"></script>
 <script src="js/audio.js"></script>
-<script src="js/effects.js"></script>
-<script src="js/boids.js"></script>
-<script src="js/planets.js"></script>
-<script src="js/levels.js"></script>
+<script src="js/themes.js"></script>
+<script src="js/gl.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/formations.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>
