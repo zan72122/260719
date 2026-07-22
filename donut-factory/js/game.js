@@ -42,6 +42,8 @@ const Game = {
   rainButtonCd: 0,
   skyfallQueue: 0,
   skyfallT: 0,
+  // しゅうりロボ（こわされた元来ベルトをなおしに来る）
+  repair: { jobs: [], bot: null },
 };
 
 // 全体の流れ係数（ターボ × イベント効果）。停電・かみなり=0、あめ=1.6倍
@@ -93,6 +95,7 @@ function loadLevel(index) {
   Game.dominoWave = null;
   Game.skyfallQueue = 0;
   Game.flipCooldown = 0;
+  Game.repair = { jobs: [], bot: null };
   hideBanner();
 
   for (let y = 0; y < Game.rows; y++) {
@@ -115,6 +118,7 @@ function loadLevel(index) {
         if (spec.outs) spec.outs = spec.outs.map(d => DIR_FROM_CHAR[d] !== undefined ? DIR_FROM_CHAR[d] : d);
         if (spec.side !== undefined) spec.side = DIR_FROM_CHAR[spec.side] !== undefined ? DIR_FROM_CHAR[spec.side] : spec.side;
         const tile = makeTile(spec, x, y);
+        tile.origDir = tile.dir;                          // しゅうりロボ用の「元の向き」
         if (tile.type === 'spawner') tile.timer = 0.8;   // すぐ最初の1個が出る
         row.push(tile);
         Game.tileList.push(tile);
@@ -362,6 +366,9 @@ function updateEvents(dt) {
   }
 
   Game.flipCooldown = Math.max(0, Game.flipCooldown - dt);
+
+  // しゅうりロボ
+  updateRepairBot(dt);
 }
 
 // らくらい！
@@ -693,6 +700,12 @@ Game.flipBoard = function () {
       if (d.state === 'belt') startFall(d, randInt(0, 3));
     }
   }
+  // 修理ジョブの座標も反転、ロボは出直し
+  for (const j of Game.repair.jobs) {
+    j.x = cols - 1 - j.x;
+    j.y = rows - 1 - j.y;
+  }
+  Game.repair.bot = null;
   Render3D.buildLevel(Game);
   Render3D.punch(0.8);
   Render3D.shake(10);
@@ -1000,6 +1013,129 @@ function squeezeOut(d) {
   const bx = d.tx - hv.x, by = d.ty - hv.y;
   const bt = tileAt(bx, by);
   if (bt && TILE_DEFS[bt.type].walkable) hopTo(d, bx, by);
+}
+
+/* ============================================================
+ * しゅうりロボ — 「破壊は事故ではなく、修理ロボとの出会いになる」
+ *  レベル元来のベルトを消すと、おばけ枠が残り、ロボが最寄りの
+ *  ボード端から走ってきてトントン！と元の向きに生やし直す。
+ * ============================================================ */
+function demolishOriginalBelt(tile) {
+  if (Game.tiles[tile.y][tile.x] !== tile) return;
+  Game.tiles[tile.y][tile.x] = null;
+  const i = Game.tileList.indexOf(tile);
+  if (i >= 0) Game.tileList.splice(i, 1);
+  Render3D.removeTileView(tile);
+  for (const d of Game.donuts) {
+    if (d.state === 'belt' && d.tx === tile.x && d.ty === tile.y) startFall(d, d.exitDir);
+  }
+  Game.repair.jobs.push({
+    x: tile.x, y: tile.y,
+    dir: tile.origDir !== undefined ? tile.origDir : tile.dir,
+  });
+  const c = tileCenter(tile);
+  AudioSys.sfx('zupon');
+  Particles.puff(c.x, c.y, 6, '#ffffff');
+  Particles.crumbs(c.x, c.y, 5);
+}
+
+function updateRepairBot(dt) {
+  const R = Game.repair;
+  // ユーザーがさきに埋めた穴のジョブは取り下げ
+  R.jobs = R.jobs.filter(j => Game.tiles[j.y] && Game.tiles[j.y][j.x] === null);
+
+  const bw = Game.cols * CELL, bh = Game.rows * CELL;
+  if (!R.bot) {
+    if (!R.jobs.length) return;
+    // いちばん近いへりから登場
+    const j = R.jobs[0];
+    const jx = (j.x + 0.5) * CELL, jy = (j.y + 0.5) * CELL;
+    const cand = [[jx, -80], [jx, bh + 80], [-80, jy], [bw + 80, jy]];
+    cand.sort((a, b) => dist2(a[0], a[1], jx, jy) - dist2(b[0], b[1], jx, jy));
+    R.bot = { x: cand[0][0], y: cand[0][1], z: 0, zBase: 0, state: 'go', workT: 0, hits: 0, faceA: 0, spinT: 0, moving: false };
+    AudioSys.sfx('beep');
+    showBanner('🔧', 'しゅうりロボ とうじょう！', 2600);
+  }
+  const bot = R.bot;
+  const speed = 190;
+  bot.spinT = Math.max(0, bot.spinT - dt);
+  bot.moving = false;
+
+  const moveToward = (tx, ty) => {
+    const dx = tx - bot.x, dy = ty - bot.y;
+    const dd = Math.hypot(dx, dy);
+    if (dd < 1) return true;
+    const step = Math.min(dd, speed * dt);
+    bot.x += dx / dd * step;
+    bot.y += dy / dd * step;
+    bot.faceA = Math.atan2(dy, dx);
+    bot.moving = true;
+    return dd <= 10;
+  };
+
+  if (bot.state === 'go') {
+    if (!R.jobs.length) {
+      bot.state = 'home';
+    } else {
+      const j = R.jobs[0];
+      if (moveToward((j.x + 0.5) * CELL, (j.y + 0.5) * CELL)) {
+        bot.state = 'work';
+        bot.workT = 0;
+        bot.hits = 0;
+      }
+    }
+  } else if (bot.state === 'work') {
+    const j = R.jobs[0];
+    if (!j) {
+      bot.state = 'home';
+    } else {
+      bot.workT += dt;
+      // トントン！
+      const due = Math.floor(bot.workT / 0.42);
+      if (due > bot.hits) {
+        bot.hits = due;
+        AudioSys.sfx(bot.hits % 2 ? 'clunk' : 'tick');
+        Render3D.shake(2.5);
+        Particles.crumbs((j.x + 0.5) * CELL, (j.y + 0.5) * CELL, 3);
+      }
+      if (bot.hits >= 3 && bot.workT > 1.35) {
+        // ベルトふっかつ！（元の向きで）
+        if (Game.tiles[j.y][j.x] === null) {
+          const tile = makeTile({ type: 'belt', dir: j.dir }, j.x, j.y);
+          tile.origDir = j.dir;
+          tile.spawnAnim = 1;
+          tile.pop = 0.6;
+          Game.tiles[j.y][j.x] = tile;
+          Game.tileList.push(tile);
+          Render3D.addTileView(tile);
+          const c = tileCenter(tile);
+          AudioSys.sfx('pokon');
+          AudioSys.sfx('chime', 4);
+          Particles.sparkle(c.x, c.y, 10, '#9edcff');
+          Particles.puff(c.x, c.y, 4, '#ffffff');
+        }
+        R.jobs.shift();
+        bot.spinT = 0.55;   // よろこびスピン
+        bot.state = R.jobs.length ? 'go' : 'home';
+      }
+    }
+  } else {   // home: いちばん近いへりから帰る
+    if (R.jobs.length) {
+      bot.state = 'go';   // あたらしい穴ができたらもどる
+    } else {
+      const exits = [[bot.x, -90], [bot.x, bh + 90], [-90, bot.y], [bw + 90, bot.y]];
+      exits.sort((a, b) => dist2(a[0], a[1], bot.x, bot.y) - dist2(b[0], b[1], bot.x, bot.y));
+      if (moveToward(exits[0][0], exits[0][1])) R.bot = null;
+    }
+  }
+
+  // 装置の上はぴょんと跳び越える
+  if (R.bot) {
+    const under = tileAt(Math.floor(bot.x / CELL), Math.floor(bot.y / CELL));
+    const zTarget = under && TILE_DEFS[under.type] && TILE_DEFS[under.type].walkable ? 36 : 0;
+    bot.zBase += (zTarget - bot.zBase) * Math.min(1, dt * 8);
+    bot.z = bot.zBase + (bot.moving ? Math.abs(Math.sin(Game.time * 11)) * 7 : 0);
+  }
 }
 
 function hopTo(d, tx, ty) {

@@ -554,6 +554,7 @@ const Render3D = (() => {
     tileViews.length = 0;
     Donut3D.clear();
     Particles.clear();
+    ghostMap.clear();   // おばけ枠は levelGroup ごと破棄されている
     camFX.shakeAmp = 0; camFX.punchP = 0; camFX.punchV = 0;
 
     const theme = game.level.theme;
@@ -815,6 +816,128 @@ const Render3D = (() => {
     }
   }
 
+  /* ============================ しゅうりロボ ============================ */
+
+  let botGroup = null, botParts = null;
+  function ensureBot() {
+    if (botGroup) return botGroup;
+    const mat3 = Donut3D.toonMat;
+    botGroup = new T.Group();
+    const inner = new T.Group();
+    botGroup.add(inner);
+    // からだ + あたま + め
+    const body = new T.Mesh(new T.BoxGeometry(24, 20, 20), mat3('#9edcff'));
+    body.position.y = 16;
+    body.castShadow = true;
+    inner.add(body);
+    const head = new T.Mesh(new T.BoxGeometry(17, 13, 16), mat3('#e2f5ff'));
+    head.position.y = 33;
+    head.castShadow = true;
+    inner.add(head);
+    const eyeM = new T.MeshBasicMaterial({ color: 0x335577 });
+    for (const s of [-1, 1]) {
+      const eye = new T.Mesh(new T.SphereGeometry(2.2, 6, 5), eyeM);
+      eye.position.set(9, 34, s * 4.5);
+      inner.add(eye);
+    }
+    // アンテナ（ちかちか）
+    const ant = new T.Mesh(new T.CylinderGeometry(0.9, 0.9, 10, 5), mat3('#8f87a3'));
+    ant.position.y = 44;
+    inner.add(ant);
+    const antTipOn = new T.MeshBasicMaterial({ color: 0xffd94d });
+    const antTipOff = new T.MeshBasicMaterial({ color: 0xb9853a });
+    const antTip = new T.Mesh(new T.SphereGeometry(2.8, 6, 5), antTipOn);
+    antTip.position.y = 50;
+    inner.add(antTip);
+    // しゃりん
+    const wheels = [];
+    for (const s of [-1, 1]) {
+      const wheel = new T.Mesh(new T.CylinderGeometry(6.5, 6.5, 5, 10), mat3('#6b6478'));
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(0, 6.5, s * 12);
+      wheels.push(wheel);
+      inner.add(wheel);
+    }
+    // 金づちアーム
+    const arm = new T.Group();
+    arm.position.set(6, 26, -13);
+    const armRod = new T.Mesh(new T.BoxGeometry(4, 16, 4), mat3('#8f87a3'));
+    armRod.position.y = 8;
+    arm.add(armRod);
+    const hammerHandle = new T.Mesh(new T.CylinderGeometry(1.6, 1.6, 16, 6), mat3('#c9a06a'));
+    hammerHandle.rotation.z = Math.PI / 2;
+    hammerHandle.position.set(8, 16, 0);
+    arm.add(hammerHandle);
+    const hammerHead = new T.Mesh(new T.BoxGeometry(7, 9, 9), mat3('#8f87a3'));
+    hammerHead.position.set(16, 16, 0);
+    hammerHead.castShadow = true;
+    arm.add(hammerHead);
+    inner.add(arm);
+    scene.add(botGroup);
+    botParts = { inner, arm, wheels, antTip, antTipOn, antTipOff };
+    return botGroup;
+  }
+
+  function updateBot(game, dt) {
+    const b = game.repair && game.repair.bot;
+    if (!b) {
+      if (botGroup) botGroup.visible = false;
+      return;
+    }
+    ensureBot();
+    botGroup.visible = true;
+    botGroup.position.set(b.x, b.z, b.y);
+    botGroup.rotation.y = -b.faceA;
+    // 金づち: 作業中はトントン、移動中はぶらぶら
+    if (b.state === 'work') {
+      botParts.arm.rotation.z = -1.1 + Math.abs(Math.sin(b.workT * 7.5)) * 1.35;
+    } else {
+      botParts.arm.rotation.z = -0.25 + Math.sin(game.time * 2.2) * 0.12;
+    }
+    // よろこびスピン
+    if (b.spinT > 0) botParts.inner.rotation.y = b.spinT * TAU * 2;
+    else botParts.inner.rotation.y = 0;
+    if (b.moving) for (const w of botParts.wheels) w.rotation.y -= dt * 14;
+    botParts.antTip.material = (Math.sin(game.time * 8) > 0) ? botParts.antTipOn : botParts.antTipOff;
+  }
+
+  /* ============================ おばけ枠（修理待ちの穴） ============================ */
+
+  const ghostMap = new Map();
+  let ghostMat = null;
+  function syncGhosts(game) {
+    if (!ghostMat) {
+      ghostMat = new T.MeshBasicMaterial({ color: 0x9a8cc4, transparent: true, opacity: 0.5, depthWrite: false });
+    }
+    const want = new Map();
+    if (game.repair) for (const j of game.repair.jobs) want.set(j.x + ',' + j.y, j);
+    for (const [key, j] of want) {
+      if (ghostMap.has(key)) continue;
+      const g = new T.Group();
+      // 点線ふうのわく（各辺2コずつの短いバー）
+      const seg = cachedGeo('ghostSeg', () => new T.BoxGeometry(30, 2.5, 6));
+      for (const [x, z, rot] of [
+        [-20, -40, 0], [20, -40, 0], [-20, 40, 0], [20, 40, 0],
+        [-40, -20, Math.PI / 2], [-40, 20, Math.PI / 2], [40, -20, Math.PI / 2], [40, 20, Math.PI / 2],
+      ]) {
+        const m = new T.Mesh(seg, ghostMat);
+        m.position.set(x, 6, z);
+        m.rotation.y = rot;
+        g.add(m);
+      }
+      g.position.set((j.x + 0.5) * CELL, 0, (j.y + 0.5) * CELL);
+      if (levelGroup) levelGroup.add(g);
+      ghostMap.set(key, g);
+    }
+    for (const [key, g] of ghostMap) {
+      if (!want.has(key)) {
+        if (levelGroup) levelGroup.remove(g);
+        ghostMap.delete(key);
+      }
+    }
+    if (ghostMap.size) ghostMat.opacity = 0.35 + 0.25 * Math.sin(game.time * 4);
+  }
+
   /* ============================ 毎フレーム ============================ */
 
   function render(game, dt) {
@@ -827,6 +950,8 @@ const Render3D = (() => {
     updateFX(dt);
     updateEnvironment(game, dt);
     updateCloud(game);
+    updateBot(game, dt);
+    syncGhosts(game);
 
     if (game.guide) {
       const c = tileCenter(game.guide.tile);
