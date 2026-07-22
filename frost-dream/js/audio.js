@@ -174,6 +174,72 @@ const AudioSys = (() => {
     chime(randInt(2, 6), { gain: 0.07, dur: 0.9 });
   }
 
+  /* ホワイトノイズの風・しぶき（バッファは1度だけ作る） */
+  let noiseBuf = null;
+  function whoosh(dur, gain, f0, f1, delay) {
+    if (!ctx || muted) return;
+    if (!noiseBuf) {
+      const len = ctx.sampleRate;
+      noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t0 = ctx.currentTime + (delay || 0);
+    const src = ctx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.1;
+    bp.frequency.setValueAtTime(Math.max(40, f0), t0);
+    bp.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + dur * 0.22);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+  }
+
+  /* 静かに押さえているときの、やわらかい心拍 */
+  function heartBeat() {
+    tone({ freq: 76, freqTo: 52, dur: 0.2, gain: 0.13 });
+    tone({ freq: 70, freqTo: 50, dur: 0.16, gain: 0.08, delay: 0.14 });
+  }
+
+  /* ためている間の、上がっていく音 */
+  function chargeTick(lvl) {
+    chime(2 + lvl * 2, { gain: 0.09, dur: 0.35 });
+  }
+
+  /* ためた玉の大爆発 */
+  function bigBoom() {
+    tone({ freq: 72, freqTo: 30, dur: 0.75, gain: 0.24, type: 'sine' });
+    whoosh(0.7, 0.16, 1100, 130);
+    chime(0, { delay: 0.12, gain: 0.14 });
+    chime(4, { delay: 0.2, gain: 0.14 });
+    chime(7, { delay: 0.28, gain: 0.16, dur: 1.2 });
+  }
+
+  /* 満ちた惑星の間欠泉 */
+  function geyser() {
+    whoosh(0.9, 0.1, 260, 1500);
+    chime(randInt(5, 9), { delay: 0.15, gain: 0.07 });
+    chime(randInt(8, 12), { delay: 0.32, gain: 0.05 });
+  }
+
+  /* 突風 */
+  function gust() {
+    whoosh(2.0, 0.07, 200, 80);
+  }
+
+  /* 彗星 */
+  function comet() {
+    whoosh(1.3, 0.05, 700, 2300);
+    for (let i = 0; i < 5; i++) chime(2 + i * 2, { delay: i * 0.09, gain: 0.05 });
+  }
+
   /* 背景でゆっくり鳴りつづける、風鈴のような環境音 */
   function startAmbient() {
     if (ambientTimer) return;
@@ -193,6 +259,7 @@ const AudioSys = (() => {
   return {
     unlock, setMuted, isMuted,
     chime, sparkleTick, boing, absorb, shimmer, formationChord,
-    planetVoice, bloom, fanfare, twinkle, whaleSong, exhale
+    planetVoice, bloom, fanfare, twinkle, whaleSong, exhale,
+    heartBeat, chargeTick, bigBoom, geyser, gust, comet
   };
 })();

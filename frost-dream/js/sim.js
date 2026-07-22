@@ -169,6 +169,18 @@ class Sim {
     for (let s = 0; s < nSpec; s++) {
       if (scCnt[s] > 0) { scX[s] /= scCnt[s]; scY[s] /= scCnt[s]; }
     }
+    // ディレクター用の計測：自由な粒子の数と、いちばん密なセル
+    this.freeCount = scCnt[0] + scCnt[1] + scCnt[2] + scCnt[3];
+    let cMax = 0, cIdx = 0;
+    for (let c = 0; c < cells; c++) {
+      let tot = gCnt[c];
+      for (let s = 1; s < nSpec; s++) tot += gCnt[s * cells + c];
+      if (tot > cMax) { cMax = tot; cIdx = c; }
+    }
+    this.clumpCount = cMax;
+    this.clumpX = ((cIdx % gw) + 0.5) * CELL;
+    this.clumpY = (((cIdx / gw) | 0) + 0.5) * CELL;
+    let spdSum = 0, spdN = 0;
 
     /* --- 光の川をグリッドに焼き込む --- */
     rfx.fill(0); rfy.fill(0);
@@ -344,16 +356,66 @@ class Sim {
           }
         } else {
           const d = Math.sqrt(d2v) || 1;
-          // 全画面に届く引力（川を描いている間は控えめに）
-          const g = (tc.river ? 90 : 300) / (1 + d * 0.004);
-          fx += dx / d * g;
-          fy += dy / d * g;
-          if (tc.age > 0.3 && d < 164) { // 押しっぱなしで近くは渦に
+          const tvx = tc.tvx || 0, tvy = tc.tvy || 0;
+          const tsp = Math.hypot(tvx, tvy);
+          // ついていく先は指のすこし後ろ → 彗星の尾になる
+          let txp = tc.x, typ = tc.y;
+          if (tsp > 60) { txp -= tvx / tsp * 55; typ -= tvy / tsp * 55; }
+          const ddx = txp - x, ddy = typ - y;
+          const dd = Math.hypot(ddx, ddy) || 1;
+          const g = (tc.river ? 90 : 300) / (1 + dd * 0.004);
+          fx += ddx / dd * g;
+          fy += ddy / dd * g;
+          if (tsp > 60 && d < 240) {
+            // 動く指の速度に乗る（リボンのように率いる）
+            const k = 1 - d / 240;
+            fx += (tvx * 1.1 - vx[i]) * 2.6 * k;
+            fy += (tvy * 1.1 - vy[i]) * 2.6 * k;
+          } else if (tc.age > 0.3 && d < 164) {
+            // 押しっぱなしで近くは渦に（心拍で強まる）
             const k = 1 - d / 164;
-            fx += (-dy / d) * 260 * k;
-            fy += (dx / d) * 260 * k;
+            const beat = 1 + (tc.pulse || 0) * 1.6;
+            fx += (-dy / d) * 260 * k * beat;
+            fy += (dx / d) * 260 * k * beat;
+            // ためすぎた玉は震えだす（爆発の予感）
+            if (tc.charge > 0.55) {
+              const jj = (tc.charge - 0.55) * 1000;
+              fx += (Math.random() - 0.5) * jj;
+              fy += (Math.random() - 0.5) * jj;
+            }
           }
         }
+      }
+
+      // ゆめのディレクター：突風・彗星・大移動
+      if (env.wind) {
+        fx += env.wind.vx * env.wind.k;
+        fy += env.wind.vy * env.wind.k;
+      }
+      if (env.comets) {
+        for (let ci = 0; ci < env.comets.length; ci++) {
+          const cm = env.comets[ci];
+          const dx = cm.x - x, dy = cm.y - y;
+          const d2c = dx * dx + dy * dy;
+          const rr = cm.pull || 320;
+          if (d2c < rr * rr) {
+            const d = Math.sqrt(d2c) || 1;
+            const k = 1 - d / rr;
+            fx += dx / d * 300 * k + (-dy / d) * 130 * k;
+            fy += dy / d * 300 * k + (dx / d) * 130 * k;
+          }
+        }
+      }
+      if (env.surge && env.surge.spec === s) {
+        fx += env.surge.vx * env.surge.k;
+        fy += env.surge.vy * env.surge.k;
+      }
+      // 世界の呼吸（8秒周期で吸って、吐く）
+      if (env.breath) {
+        const dxc = W * 0.5 - x, dyc = H * 0.5 - y;
+        const dc = Math.hypot(dxc, dyc) || 1;
+        fx += dxc / dc * env.breath * 15;
+        fy += dyc / dc * env.breath * 15;
       }
 
       // 波紋パルス（タップ＝小波、指を離した「息」＝大波）
@@ -372,26 +434,30 @@ class Sim {
       }
 
       // 惑星：同じ種は引き寄せ→捕獲、ちがう種はやさしく押し返す
+      // 満ちた惑星も弱く吸って回し、噴水として吐き出す（世界の総量保存）
       let captured = false;
       for (let pli = 0; pli < planets.length; pli++) {
         const pl = planets[pli];
         const dx = pl.x - x, dy = pl.y - y;
         const d2v = dx * dx + dy * dy;
-        if (pl.specIdx === s && !pl.full) {
-          const pull = pl.r + 100;
+        if (pl.specIdx === s) {
+          const pull = pl.full ? pl.r + 55 : pl.r + 100;
           if (d2v < pull * pull) {
             const d = Math.sqrt(d2v) || 1;
-            fx += dx / d * (30 + 200 * (1 - d / pull));
-            fy += dy / d * (30 + 200 * (1 - d / pull));
-            if (d < pl.r * 0.85 && pl.captured < pl.quota) {
+            const w = pl.full ? 40 * (1 - d / pull) : 30 + 200 * (1 - d / pull);
+            fx += dx / d * w;
+            fy += dy / d * w;
+            if (d < pl.r * (pl.full ? 0.7 : 0.85)) {
               mode[i] = 2;
               this.pIdx[i] = pli;
               this.orbA[i] = Math.atan2(y - pl.y, x - pl.x);
               this.orbS[i] = rand(1.0, 2.4) * (Math.random() < 0.5 ? -1 : 1);
               this.tgtX[i] = d;
               this.tgtY[i] = pl.r * rand(1.05, 1.9);
-              pl.captured++;
-              this.events.push({ type: 'capture', planet: pli });
+              if (!pl.full && pl.captured < pl.quota) {
+                pl.captured++;
+                this.events.push({ type: 'capture', planet: pli });
+              }
               captured = true;
               break;
             }
@@ -420,7 +486,12 @@ class Sim {
       const damp = 1 - 0.30 * dt;
       vx[i] *= damp; vy[i] *= damp;
       const sp2 = vx[i] * vx[i] + vy[i] * vy[i];
-      if (sp2 > 72900) { const sc = 270 / Math.sqrt(sp2); vx[i] *= sc; vy[i] *= sc; }
+      if (sp2 > 72900) {
+        // 上限超過は即クランプせず徐々に減速（爆発や波が伸びやかに飛ぶ）
+        const sp = Math.sqrt(sp2);
+        const sc = Math.max(270, sp * 0.92) / sp;
+        vx[i] *= sc; vy[i] *= sc;
+      }
       else if (sp2 < 576 && sp2 > 0.01) { const sc = 24 / Math.sqrt(sp2); vx[i] *= sc; vy[i] *= sc; }
       px[i] += vx[i] * dt;
       py[i] += vy[i] * dt;
@@ -428,7 +499,67 @@ class Sim {
       if (px[i] > W - 2) { px[i] = W - 2; vx[i] = -Math.abs(vx[i]) * 0.5; }
       if (py[i] < 2) { py[i] = 2; vy[i] = Math.abs(vy[i]) * 0.5; }
       if (py[i] > H - 2) { py[i] = H - 2; vy[i] = -Math.abs(vy[i]) * 0.5; }
+      spdSum += Math.hypot(vx[i], vy[i]);
+      spdN++;
     }
+    this.avgSpeed = spdN > 0 ? spdSum / spdN : 0;
+  }
+
+  /* 点(x,y)の半径R内にいる自由な粒子のおおよその数（グリッド集計を利用） */
+  countNear(x, y, R) {
+    const gw = this.gw, gh = this.gh, cells = this.cells;
+    const x0 = Math.max(0, ((x - R) / CELL) | 0), x1 = Math.min(gw - 1, ((x + R) / CELL) | 0);
+    const y0 = Math.max(0, ((y - R) / CELL) | 0), y1 = Math.min(gh - 1, ((y + R) / CELL) | 0);
+    let sum = 0;
+    for (let cy = y0; cy <= y1; cy++) {
+      for (let cx = x0; cx <= x1; cx++) {
+        const c = cy * gw + cx;
+        for (let s = 0; s < this.numSpec; s++) sum += this.gCnt[s * cells + c];
+      }
+    }
+    return sum;
+  }
+
+  /* 惑星のリングから粒子を解き放つ。geyser=true なら勢いよく上に吹き上げる */
+  eruptPlanet(pli, frac, maxK, geyser) {
+    const idxs = [];
+    for (let i = this.dustN; i < this.n; i++) {
+      if (this.mode[i] === 2 && this.pIdx[i] === pli) idxs.push(i);
+    }
+    const k = Math.min(maxK, Math.ceil(idxs.length * frac));
+    for (let c = 0; c < k; c++) {
+      const swap = randInt(c, idxs.length - 1);
+      const tmp = idxs[c]; idxs[c] = idxs[swap]; idxs[swap] = tmp;
+      const i = idxs[c];
+      this.mode[i] = 0;
+      if (geyser) {
+        this.vx[i] = rand(-95, 95);
+        this.vy[i] = -rand(240, 430);
+      } else {
+        this.vx[i] = rand(-45, 45);
+        this.vy[i] = -rand(30, 100);
+      }
+    }
+    return k;
+  }
+
+  /* 点(x,y)の半径R内の自由な粒子を四方八方に吹き飛ばす（ためた玉の爆発） */
+  burstAt(x, y, R) {
+    const R2 = R * R;
+    let c = 0;
+    for (let i = this.dustN; i < this.n; i++) {
+      if (this.mode[i] !== 0) continue;
+      const dx = this.px[i] - x, dy = this.py[i] - y;
+      const d2v = dx * dx + dy * dy;
+      if (d2v < R2) {
+        const d = Math.sqrt(d2v) || 1;
+        const v = rand(340, 780);
+        this.vx[i] = dx / d * v + rand(-90, 90);
+        this.vy[i] = dy / d * v + rand(-90, 90);
+        c++;
+      }
+    }
+    return c;
   }
 
   /* 頂点バッファへ書き出し。waves = お祝いの色の洪水（画面全体を波が染める）。

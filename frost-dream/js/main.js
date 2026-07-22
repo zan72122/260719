@@ -51,7 +51,13 @@
   let whaleT = rand(7, 14);
   let whaleSongT = -9;
   let whaleWakeT = 0;
+  let flashA = 0;                      // 爆発の白いフラッシュ
   const touches = new Map();
+  /* ゆめのディレクター：世界が静かになったらドラマを注入する */
+  const director = {
+    last: 0, quietT: 0, noTouchT: 0,
+    wind: null, comets: [], surge: null
+  };
   let auroras = [];
   let auroraDefs = [];
 
@@ -109,6 +115,11 @@
     bannerT = 0;
     fullPlanets = 0;
     animalT = rand(50, 80);
+    director.wind = null;
+    director.comets = [];
+    director.surge = null;
+    director.quietT = 0;
+    director.last = elapsed;
     setupAuroras();
 
     planets = [];
@@ -125,7 +136,8 @@
         x: 0, y: 0, r: 40,
         specIdx: i, color: sp.color, colorF: sp.colorF,
         quota, captured: 0, full: false,
-        pulse: 0, blink: 0, blinkT: rand(1.5, 4), noteIdx: i * 2 + (themeIdx % 3)
+        pulse: 0, blink: 0, blinkT: rand(1.5, 4), noteIdx: i * 2 + (themeIdx % 3),
+        eruptT: rand(2, 4), leakT: rand(5, 8)
       });
     }
     layoutPlanets();
@@ -218,6 +230,7 @@
       if (whale) {
         AudioSys.whaleSong();
         whaleSongT = t;
+        director.last = t;      // くじら登場もひとつのドラマ
       } else {
         whaleT = 12;
       }
@@ -243,6 +256,81 @@
     }
   }
 
+  /* ---- ゆめのディレクター：静けさを検知してドラマを注入 ---- */
+  function updateDirector(dt, t) {
+    // 進行中イベントの更新（どの状態でも動かして自然に終わらせる）
+    if (director.wind) {
+      director.wind.tLeft -= dt;
+      director.wind.k = 215 * Math.sin(Math.PI * clamp(1 - director.wind.tLeft / director.wind.dur, 0, 1));
+      if (director.wind.tLeft <= 0) director.wind = null;
+    }
+    for (let i = director.comets.length - 1; i >= 0; i--) {
+      const cm = director.comets[i];
+      cm.t += dt;
+      if (cm.t < 0) continue;
+      cm.x += cm.vx * dt;
+      cm.y += cm.vy * dt;
+      if (cm.t > cm.life) {
+        pulses.push({ x: cm.x, y: cm.y, age: 0, sp: 480, str: 0.8, life: 0.9 });
+        director.comets.splice(i, 1);
+      }
+    }
+    if (director.surge) {
+      director.surge.tLeft -= dt;
+      director.surge.k = Math.sin(Math.PI * clamp(1 - director.surge.tLeft / director.surge.dur, 0, 1));
+      if (director.surge.tLeft <= 0) director.surge = null;
+    }
+    if (state !== 'play') { director.quietT = 0; return; }
+    director.noTouchT = touches.size ? 0 : director.noTouchT + dt;
+    director.quietT = sim.avgSpeed < 62 ? director.quietT + dt : 0;
+    if (director.noTouchT < 2.5) return;
+    const since = t - director.last;
+    if (since > 16 || (director.quietT > 4 && since > 8)) fireDirector(t);
+  }
+
+  function fireDirector(t) {
+    director.last = t;
+    // 置き去りにされた密な玉があれば、まずそれを花火にする
+    if (sim.clumpCount > 150) {
+      sim.burstAt(sim.clumpX, sim.clumpY, 240);
+      pulses.push({ x: sim.clumpX, y: sim.clumpY, age: 0, sp: 780, str: 1.8, life: 1.3 });
+      pushWave(sim.clumpX, sim.clumpY, pick(theme.species).colorF, 0.7);
+      AudioSys.bigBoom();
+      flashA = 0.55;
+      return;
+    }
+    const ev = pick(['gust', 'comet', 'meteors', 'surge']);
+    if (ev === 'gust') {
+      const a = rand(TAU);
+      director.wind = { vx: Math.cos(a), vy: Math.sin(a) * 0.6, k: 0, dur: 2.4, tLeft: 2.4 };
+      AudioSys.gust();
+    } else if (ev === 'comet' || ev === 'meteors') {
+      const nC = ev === 'comet' ? 1 : 3;
+      for (let i = 0; i < nC; i++) {
+        const fromLeft = Math.random() < 0.5;
+        const spd = (W + H) * (ev === 'comet' ? 0.32 : 0.55);
+        director.comets.push({
+          x: fromLeft ? -50 : W + 50,
+          y: rand(H * 0.08, H * 0.55),
+          vx: (fromLeft ? 1 : -1) * spd * rand(0.85, 1.1),
+          vy: spd * rand(0.12, 0.35),
+          t: -i * 0.45,
+          life: ev === 'comet' ? 3.4 : 1.9,
+          pull: ev === 'comet' ? 330 : 150
+        });
+      }
+      AudioSys.comet();
+    } else {
+      const a = rand(TAU);
+      director.surge = {
+        spec: randInt(0, theme.species.length - 1),
+        vx: Math.cos(a) * 290, vy: Math.sin(a) * 290,
+        k: 0, dur: 2.4, tLeft: 2.4
+      };
+      AudioSys.gust();
+    }
+  }
+
   /* ---- 入力 ---- */
   function onDown(id, x, y) {
     AudioSys.unlock();
@@ -253,12 +341,22 @@
       startGame();
       return;
     }
-    touches.set(id, { x, y, sx: x, sy: y, age: 0, moved: 0, river: null, longFired: false });
+    touches.set(id, {
+      x, y, sx: x, sy: y, age: 0, moved: 0, river: null, longFired: false,
+      tvx: 0, tvy: 0, mT: performance.now(),
+      charge: 0, chargeCool: 0, chargeLvl: 0, beatT: 0, pulse: 0
+    });
   }
 
   function onMove(id, x, y) {
     const tc = touches.get(id);
     if (!tc) return;
+    // 指の速度（彗星の尾の向きに使う）
+    const nowMs = performance.now();
+    const mdt = Math.max(8, nowMs - tc.mT) / 1000;
+    tc.mT = nowMs;
+    tc.tvx = lerp(tc.tvx, (x - tc.x) / mdt, 0.45);
+    tc.tvy = lerp(tc.tvy, (y - tc.y) / mdt, 0.45);
     tc.moved += Math.hypot(x - tc.x, y - tc.y);
     tc.x = x; tc.y = y;
     if (!tc.river && tc.moved > 16) {
@@ -380,15 +478,60 @@
 
   /* ---- 更新 ---- */
   function update(dt, t) {
-    // タッチの経過（長押しで形が咲く）
+    // タッチの経過（長押しで形が咲く・心拍・ためて爆発）
     for (const tc of touches.values()) {
       tc.age += dt;
+      const dec = Math.exp(-6 * dt);       // 動きが止まったら指の速度を減衰
+      tc.tvx *= dec; tc.tvy *= dec;
+      tc.pulse = Math.max(0, tc.pulse - dt * 3);
+      tc.chargeCool = Math.max(0, tc.chargeCool - dt);
       if (!tc.river && !tc.longFired && tc.age > 1.5 && tc.moved < 16 &&
           (state === 'play' || state === 'celebrate')) {
         tc.longFired = true;
         spawnShape(pick(TAP_SYMBOLS), tc.x, tc.y, Math.min(W, H) * rand(0.13, 0.18), 2.2);
       }
+      if (state !== 'play' && state !== 'celebrate') continue;
+      const still = Math.hypot(tc.tvx, tc.tvy) < 55;
+      // 心拍：静かに押さえていると、玉が脈打って小さな波を放つ
+      if (still && tc.age > 0.6) {
+        tc.beatT += dt;
+        if (tc.beatT >= 1.15) {
+          tc.beatT = 0;
+          tc.pulse = 1;
+          pulses.push({ x: tc.x, y: tc.y, age: 0, sp: 340, str: 0.5, life: 0.8 });
+          AudioSys.heartBeat();
+        }
+      } else {
+        tc.beatT = 0;
+      }
+      // ため：集まった密度が上がるほど震え、音が上がり、満タンで大爆発
+      // （どんなに密でも2.5秒はかけて溜まる＝ワクワクの時間を保証）
+      if (tc.age > 0.5 && tc.chargeCool <= 0) {
+        const cnt = sim.countNear(tc.x, tc.y, 120);
+        const need = Math.max(350, sim.freeCount * 0.38);
+        tc.charge = Math.min(clamp(cnt / need, 0, 1), (tc.age - 0.5) / 2.5);
+        const lvl = Math.floor(tc.charge * 6);
+        if (lvl > tc.chargeLvl && tc.charge > 0.4) {
+          tc.chargeLvl = lvl;
+          AudioSys.chargeTick(lvl);
+        }
+        if (tc.charge >= 1) {
+          tc.charge = 0;
+          tc.chargeLvl = 0;
+          tc.chargeCool = 2.2;
+          sim.burstAt(tc.x, tc.y, 240);
+          pulses.push({ x: tc.x, y: tc.y, age: 0, sp: 840, str: 2.2, life: 1.5 });
+          pushWave(tc.x, tc.y, [1, 0.97, 0.88], 0.85);
+          AudioSys.bigBoom();
+          flashA = 0.9;
+          director.last = elapsed;
+        }
+      } else {
+        tc.charge = 0;
+        tc.chargeLvl = 0;
+      }
     }
+    flashA = Math.max(0, flashA - dt * 2.4);
     // 川の寿命
     for (let i = rivers.length - 1; i >= 0; i--) {
       const rv = rivers[i];
@@ -486,19 +629,47 @@
       }
     }
 
-    /* 惑星の顔まわり */
-    for (const pl of planets) {
+    /* 惑星の顔まわり・噴水・しずくの補充 */
+    for (let pi = 0; pi < planets.length; pi++) {
+      const pl = planets[pi];
       pl.pulse = Math.max(0, pl.pulse - dt * 2.2);
       pl.blinkT -= dt;
       if (pl.blinkT <= 0) { pl.blink = 0.16; pl.blinkT = rand(1.8, 4.5); }
       if (pl.blink > 0) pl.blink -= dt;
+      if (state !== 'play' && state !== 'celebrate') continue;
+      if (pl.full) {
+        // 満ちた惑星は間欠泉：吸い込んだ光を吹き上げて世界に返す
+        pl.eruptT -= dt;
+        if (pl.eruptT <= 0) {
+          pl.eruptT = rand(3.5, 6);
+          const k = sim.eruptPlanet(pi, 0.45, 260, true);
+          if (k > 8) {
+            AudioSys.geyser();
+            pl.pulse = Math.max(pl.pulse, 0.8);
+            if (Math.random() < 0.3) pushWave(pl.x, pl.y, pl.colorF, 0.35);
+          }
+        }
+      } else if (pl.captured > 40) {
+        // まだ満ちていない惑星も、ときどきしずくをこぼして世界を賑やかに保つ
+        pl.leakT -= dt;
+        if (pl.leakT <= 0) {
+          pl.leakT = rand(6, 9);
+          sim.eruptPlanet(pi, 0.1, 10, false);
+        }
+      }
     }
 
     /* シミュレーション本体 */
+    updateDirector(dt, t);
+    const activeComets = director.comets.filter(c => c.t >= 0);
     const env = {
       species: theme.species,
       touches: [...touches.values()],
       rivers, pulses, planets,
+      wind: director.wind,
+      comets: activeComets,
+      surge: director.surge,
+      breath: Math.sin(t * TAU / 8),   // 世界の呼吸
       events: sim.events
     };
     sim.step(dt, t, env);
@@ -568,9 +739,18 @@
         sim.appendExtra(pl.x, pl.y, rr * (4.6 + Math.sin(t * 2.2) * 0.5), r * 0.12, g * 0.12, b * 0.12);
       }
     }
-    // 指の下の光
+    // 指の下の光（ためるほど大きく白く、心拍で脈打つ）
     for (const tc of touches.values()) {
-      sim.appendExtra(tc.x, tc.y, 60, 0.5, 0.48, 0.55);
+      const gs = 60 + tc.charge * 100 + tc.pulse * 45;
+      const b = 0.5 + tc.charge * 0.45;
+      sim.appendExtra(tc.x, tc.y, gs, b, b * 0.96, b);
+    }
+    // 彗星の頭と尾
+    for (const cm of director.comets) {
+      if (cm.t < 0) continue;
+      sim.appendExtra(cm.x, cm.y, 110, 0.9, 0.9, 1.0);
+      sim.appendExtra(cm.x - cm.vx * 0.06, cm.y - cm.vy * 0.06, 62, 0.5, 0.5, 0.72);
+      sim.appendExtra(cm.x - cm.vx * 0.13, cm.y - cm.vy * 0.13, 36, 0.28, 0.28, 0.5);
     }
     // 川の先端のきらめき
     for (const rv of rivers) {
@@ -684,6 +864,12 @@
       fx.restore();
     }
 
+    /* 爆発の白いフラッシュ */
+    if (flashA > 0) {
+      fx.fillStyle = 'rgba(255,252,240,' + (flashA * 0.3) + ')';
+      fx.fillRect(0, 0, W, H);
+    }
+
     /* 場面転換のフェード */
     if (state === 'transition' && fadeA > 0) {
       fx.fillStyle = 'rgba(6,3,20,' + Math.min(1, fadeA) + ')';
@@ -727,6 +913,7 @@
       verts: sim.verts,
       count: sim.vertCount,
       theme, auroras, t: elapsed,
+      breath: Math.sin(elapsed * TAU / 8),
       decay: 0.90
     });
     drawOverlay(elapsed);
@@ -743,7 +930,11 @@
     get rivers() { return rivers; },
     formationCount: () => Formations.count(),
     get whale() { return whale; },
+    get director() { return director; },
+    get touchList() { return [...touches.values()]; },
     forceWhale: () => { whale = null; whaleT = 0; },
+    fireNow: () => fireDirector(elapsed),
+    erupt: (i) => sim.eruptPlanet(i, 0.6, 400, true),
     testWave: () => pushWave(W / 2, H / 2, [1, 0.5, 0.7], 1.1),
     testText: (s) => spawnText(s, W / 2, H * 0.42, 0.92, 0.5, 3.0, 2200),
     testShape: (n) => spawnShape(n, W / 2, H * 0.45, Math.min(W, H) * 0.2, 3.0)
