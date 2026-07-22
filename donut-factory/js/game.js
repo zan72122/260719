@@ -157,6 +157,7 @@ Game.collectDonut = function (donut, tile) {
   if (tile.count >= 12) {
     tile.count = 0;
     tile.shipT = 1;
+    AudioSys.sfx('honk');
     AudioSys.sfx('fanfare');
     Particles.confetti(c.x, c.y, 40);
     Particles.stars(c.x, c.y, 14);

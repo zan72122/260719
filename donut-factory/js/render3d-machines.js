@@ -62,13 +62,45 @@
     };
   };
 
-  /* ---------------- スポナー（ドーナツ製造マシン） ---------------- */
+  /* ---------------- スポナー（ドーナツ製造マシン＝こうじょうの入口） ---------------- */
   BUILDERS.spawner = (view, tile) => {
     const g = view.group;
-    g.add(makeBase('#ffe0ef'));
+    // スタートはみどりの床
+    g.add(makeBase('#bce8b6'));
+    const startPad = mkBox(100, 3, 100, '#a5dfa0');
+    startPad.position.y = 1;
+    g.add(startPad);
     const lane = makeLane(view, true);
     lane.rotation.y = yawOf(tile.dir);
     g.add(lane);
+    // ドーナツ出口のひかるリング
+    const exitRingM = new T.MeshBasicMaterial({ color: 0x57d957, transparent: true, opacity: 0.7, depthWrite: false });
+    gc(exitRingM);
+    const exitRing = new T.Mesh(cachedGeo('exitRing', () => new T.TorusGeometry(30, 3.2, 8, 28).rotateX(Math.PI / 2)), exitRingM);
+    exitRing.position.y = BELT_TOP + 1.6;
+    g.add(exitRing);
+    // 大きな「🍩」かんばん
+    const sign = new T.Group();
+    for (const sx of [-20, 20]) {
+      const pole = mkCyl(2.6, 3.2, 44, METAL, 8, true);
+      pole.position.set(sx, 96, 0);
+      sign.add(pole);
+    }
+    const boardBack = mkBox(52, 38, 4, '#57b357', true);
+    boardBack.position.y = 126;
+    sign.add(boardBack);
+    const board = mkBox(46, 32, 4, '#ffffff', true);
+    board.position.set(0, 126, 1.5);
+    sign.add(board);
+    const signDonut = new T.Mesh(cachedGeo('signDonut', () => new T.TorusGeometry(11, 6, 10, 18)), mat('#f4bd76'));
+    signDonut.position.set(0, 126, 5.5);
+    sign.add(signDonut);
+    const signFrost = new T.Mesh(cachedGeo('signFrost', () => new T.TorusGeometry(11, 6.6, 10, 18)), mat('#ff9ec7'));
+    signFrost.scale.z = 0.55;
+    signFrost.position.set(0, 126, 7);
+    sign.add(signFrost);
+    sign.position.z = -34;
+    g.add(sign);
 
     const rig = new T.Group();
     // 4本柱 + 天板
@@ -123,6 +155,14 @@
       nozzle.scale.set(1 + k * 0.45, 1 - k * 0.35, 1 + k * 0.45);
       tank.scale.y = 1 - k * 0.12;
       needle.rotation.z = Math.sin(time * 3.1) * 0.6 - k * 1.2;
+      // 出口リングのパルス（ドーナツが出ると大きくひかる）
+      const pulse = 0.5 + 0.5 * Math.sin(time * 4);
+      exitRingM.opacity = 0.35 + pulse * 0.3 + k * 0.4;
+      const rs = 1 + pulse * 0.08 + k * 0.3;
+      exitRing.scale.set(rs, 1, rs);
+      // かんばんはカメラのほうを向いて、ゆらゆら
+      sign.rotation.y = I.isRotated() ? Math.PI / 2 : 0;
+      sign.rotation.z = Math.sin(time * 1.4) * 0.03;
       steamT -= dt;
       if (steamT <= 0) {
         steamT = 0.85;
@@ -132,69 +172,145 @@
     };
   };
 
-  /* ---------------- ボックス（出荷ステーション） ---------------- */
+  /* ---------------- ボックス（ゴール＝はいたつトラック） ---------------- */
   BUILDERS.box = (view, tile) => {
     const g = view.group;
-    g.add(makeBase('#ffd9b0'));
-    const bx = new T.Group();
-    const bottom = mkBox(70, 6, 70, '#ff9ec7', true);
-    bottom.position.y = 12;
-    bx.add(bottom);
-    for (const [x, z, w, d] of [[0, -33, 70, 8], [0, 33, 70, 8], [-33, 0, 8, 70], [33, 0, 8, 70]]) {
-      const wall = mkBox(w, 30, d, '#ff9ec7', true);
-      wall.position.set(x, 26, z);
-      bx.add(wall);
+    // ゴールは赤いじゅうたん
+    g.add(makeBase('#ff9d9d'));
+    const carpet = mkBox(100, 3, 100, '#f57d7d');
+    carpet.position.y = 1;
+    g.add(carpet);
+    for (const s of [-1, 1]) {
+      const stripe = mkBox(100, 3.4, 7, '#ffffff');
+      stripe.position.set(0, 1.2, s * 44);
+      g.add(stripe);
+      const stripe2 = mkBox(7, 3.4, 100, '#ffffff');
+      stripe2.position.set(s * 44, 1.2, 0);
+      g.add(stripe2);
     }
-    const ribbon = mkBox(74, 8, 12, '#ff6f9c');
-    ribbon.position.y = 40;
-    bx.add(ribbon);
-    // なかのミニドーナツ
+
+    // トラックの向き = いちばん近いボードのはし（そこから走り去る）
+    const dists = [
+      Game.cols - 1 - tile.x,   // E
+      Game.rows - 1 - tile.y,   // S
+      tile.x,                   // W
+      tile.y,                   // N
+    ];
+    let facing = 0;
+    for (let d = 1; d < 4; d++) if (dists[d] < dists[facing]) facing = d;
+    const fx = DX[facing], fz = DY[facing];
+
+    // トラック本体（ローカル +x が前）
+    const truck = new T.Group();
+    // シャシー + 荷台（ドーナツを受ける箱）
+    const chassis = mkBox(84, 8, 52, METAL_DARK, true);
+    chassis.position.y = 12;
+    truck.add(chassis);
+    const bedBottom = mkBox(56, 5, 52, '#ff8f8f', true);
+    bedBottom.position.set(-12, 17, 0);
+    truck.add(bedBottom);
+    for (const [bx2, bz, w, d] of [[-38, 0, 6, 52], [14, 0, 6, 52], [-12, -24, 58, 6], [-12, 24, 58, 6]]) {
+      const wall = mkBox(w, 22, d, '#ff8f8f', true);
+      wall.position.set(bx2, 28, bz);
+      truck.add(wall);
+    }
+    // キャビン（うんてんせき）
+    const cab = mkBox(26, 26, 44, '#f56b6b', true);
+    cab.position.set(30, 26, 0);
+    truck.add(cab);
+    const cabTop = mkBox(24, 16, 40, '#ff8f8f', true);
+    cabTop.position.set(28, 46, 0);
+    truck.add(cabTop);
+    const windshield = mkBox(4, 12, 32, '#cfeaf5');
+    windshield.position.set(41, 46, 0);
+    truck.add(windshield);
+    // ヘッドライト
+    const lightM = new T.MeshBasicMaterial({ color: 0xfff2a8 });
+    gc(lightM);
+    for (const s of [-1, 1]) {
+      const hl = new T.Mesh(cachedGeo('lamp', () => new T.SphereGeometry(3.2, 8, 6)), lightM);
+      hl.position.set(44, 22, s * 16);
+      truck.add(hl);
+    }
+    // タイヤ4本
+    const wheels = [];
+    for (const [wx2, wz] of [[-28, -27], [-28, 27], [30, -27], [30, 27]]) {
+      const wheel = mkCyl(9, 9, 7, '#6b6478', 12, true);
+      wheel.rotation.x = Math.PI / 2;
+      wheel.position.set(wx2, 9, wz);
+      truck.add(wheel);
+      const hubcap = mkCyl(4, 4, 8.5, BOLT, 8);
+      hubcap.rotation.x = Math.PI / 2;
+      hubcap.position.set(wx2, 9, wz);
+      truck.add(hubcap);
+      wheels.push(wheel, hubcap);
+    }
+    // なかのミニドーナツ + カウント
     const minis = [];
     const miniGeo = cachedGeo('miniDonut', () => new T.TorusGeometry(9, 5.5, 8, 14).rotateX(Math.PI / 2));
     const miniCols = ['#ff9ec7', '#8a5a3b', '#9edcff'];
     for (let i = 0; i < 3; i++) {
       const md = new T.Mesh(miniGeo, mat(miniCols[i]));
-      md.position.set(-16 + i * 16, 20, 6);
+      md.position.set(-26 + i * 14, 24, 0);
       md.visible = false;
-      bx.add(md);
+      truck.add(md);
       minis.push(md);
     }
-    g.add(bx);
-    // 出荷ローラー（箱の下）
-    for (let i = -1; i <= 1; i++) {
-      const roller = mkCyl(4, 4, 66, '#c4b8d8', 8);
-      roller.rotation.x = Math.PI / 2;
-      roller.position.set(i * 22, 9, 0);
-      g.add(roller);
+    const label = textSprite('0', 36, { color: '#c04b4b', strokeStyle: '#ffffff' });
+    label.position.set(-12, 62, 0);
+    truck.add(label);
+    truck.rotation.y = yawOf(facing);
+    g.add(truck);
+
+    // ゴールの旗ガーランド（トラックのうしろがわ＝入口）
+    const flagG = new T.Group();
+    for (const s of [-1, 1]) {
+      const pole = mkCyl(2.2, 2.8, 52, '#ffffff', 8, true);
+      pole.position.set(-46, 26, s * 46);
+      flagG.add(pole);
     }
-    // カウンターボード
-    const pole = mkCyl(2.5, 3, 40, METAL, 8, true);
-    pole.position.set(-42, 20, -40);
-    g.add(pole);
-    const board = mkBox(30, 26, 5, '#ffffff', true);
-    board.position.set(-42, 48, -40);
-    g.add(board);
-    const label = textSprite('0', 34, { color: '#b2557f', strokeStyle: '#ffffff' });
-    label.position.set(-42, 48, -36);
-    g.add(label);
+    const flagCols = ['#ff6f6f', '#ffd94d', '#7ce27c', '#5cc8ff', '#ff9ec7'];
+    for (let i = 0; i < 5; i++) {
+      const flag = new T.Mesh(cachedGeo('pennant', () => new T.ConeGeometry(6.5, 16, 4)), mat(flagCols[i]));
+      const t = i / 4;
+      flag.position.set(-46, 48 - Math.sin(t * Math.PI) * 7, -46 + t * 92);
+      flag.rotation.z = Math.PI;
+      flagG.add(flag);
+    }
+    flagG.rotation.y = yawOf(facing);
+    const fc = tileCenter(tile);
+    // フラッグは回転しない位置（タイルローカル）なのでトラックと同じ向きに
+    g.add(flagG);
     // ビーコン（回る星）
-    const beaconPole = mkCyl(2, 2.5, 30, METAL, 8);
-    beaconPole.position.set(42, 15, -40);
-    g.add(beaconPole);
     const star = new T.Mesh(cachedGeo('deco-star', () => new T.OctahedronGeometry(11)), mat('#ffd94d'));
     star.scale.set(0.8, 0.55, 0.8);
-    star.position.set(42, 34, -40);
+    star.position.set(-42, 8, -42);
     g.add(star);
     view.spinners.push({ obj: star, axis: 'y', speed: 2.2 });
-    view.popTarget = bx;
+    view.popTarget = truck;
 
-    view.update = () => {
-      // 出荷: 新しい箱が上からドスンと落ちてくる
-      const dropY = easeInCubic(tile.shipT) * 140;
-      bx.position.y = dropY;
-      const shipK = tile.shipT > 0 ? Math.max(0.05, easeOutBack(1 - tile.shipT * 0.6)) : 1;
-      bx.scale.set(shipK, shipK, shipK);
-      updateSpriteText(label, String(tile.count), { color: '#b2557f', strokeStyle: '#ffffff' });
+    let lastOff = 0, dustT = 0;
+    view.update = (dt, time) => {
+      // 出荷: クラクション→発車→あたらしいトラックがバック搬入
+      let off = 0;
+      const s = tile.shipT;
+      if (s > 0) {
+        if (s > 0.55) off = easeInCubic((1 - s) / 0.45) * 460;
+        else off = 460 * easeInCubic(s / 0.55);
+      }
+      truck.position.set(fx * off, 0, fz * off);
+      // はしっている間はタイヤが回り、ほこりが出る
+      const moving = Math.abs(off - lastOff);
+      if (moving > 0.5) {
+        for (const w of wheels) w.rotation.z -= moving * 0.05;
+        dustT -= dt;
+        if (dustT <= 0) {
+          dustT = 0.08;
+          Particles.puff(fc.x + fx * (off - 40), fc.y + fz * (off - 40), 2, '#e8ddd0');
+        }
+      }
+      lastOff = off;
+      updateSpriteText(label, String(tile.count), { color: '#c04b4b', strokeStyle: '#ffffff' });
       for (let i = 0; i < 3; i++) minis[i].visible = i < Math.min(3, tile.count);
     };
   };

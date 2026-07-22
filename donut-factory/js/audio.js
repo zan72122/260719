@@ -117,6 +117,13 @@ const AudioSys = (() => {
     },
     spin()     { for (let i = 0; i < 5; i++) tone(500 + i * 140, 0.06, { type: 'square', vol: 0.12, delay: i * 0.05 }); },
     zap()      { tone(900, 0.14, { type: 'sawtooth', slideTo: 300, vol: 0.16 }); },
+    honk()     {
+      tone(345, 0.18, { type: 'square', vol: 0.22 });
+      tone(435, 0.18, { type: 'square', vol: 0.22 });
+      tone(345, 0.3, { type: 'square', vol: 0.2, delay: 0.24 });
+      tone(435, 0.3, { type: 'square', vol: 0.2, delay: 0.24 });
+    },
+    beep()     { tone(880, 0.12, { type: 'square', vol: 0.14 }); tone(880, 0.12, { type: 'square', vol: 0.14, delay: 0.3 }); },
   };
 
   function sfx(name, arg) {

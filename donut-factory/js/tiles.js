@@ -87,7 +87,12 @@ const TILE_DEFS = {
       const c = tileCenter(tile);
       Particles.hearts(c.x, c.y, 4);
     },
-    update(tile, dt) { tile.shipT = Math.max(0, tile.shipT - dt); },
+    update(tile, dt) {
+      const before = tile.shipT;
+      tile.shipT = Math.max(0, tile.shipT - dt * 0.7);
+      // あたらしいトラックがバックしてくる間はピッピッと鳴る
+      if (before > 0.55 && tile.shipT <= 0.55) AudioSys.sfx('beep');
+    },
   },
 
   /* ---------------- フロスター（色がけ） ---------------- */

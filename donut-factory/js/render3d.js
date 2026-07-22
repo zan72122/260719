@@ -757,6 +757,12 @@ const Render3D = (() => {
       makeLane, makeHalfLane, yawOf, cachedGeo,
       BUILDERS,
       gc: (r) => levelGC.push(r),
+      // 縦画面（90°回した方位から見ている）かどうか
+      isRotated: () => {
+        const g = window.Game;
+        if (!g || !g.level) return false;
+        return (g.cols >= g.rows) !== (vw >= vh);
+      },
       METAL, METAL_DARK, BOLT,
       get gradientTex() { return gradientTex; },
     },
