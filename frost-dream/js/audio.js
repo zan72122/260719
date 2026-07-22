@@ -161,6 +161,19 @@ const AudioSys = (() => {
     chime(randInt(6, 11), { gain: 0.1, dur: 0.4 });
   }
 
+  /* くじらの歌（低くゆったりとしたグライド） */
+  function whaleSong() {
+    tone({ freq: 150, freqTo: 235, dur: 1.4, gain: 0.11, attack: 0.25 });
+    tone({ freq: 300, freqTo: 470, dur: 1.4, gain: 0.035, attack: 0.25 });
+    tone({ freq: 228, freqTo: 165, dur: 1.7, gain: 0.07, attack: 0.3, delay: 0.9 });
+  }
+
+  /* 指を離したときの大きな「息」 */
+  function exhale() {
+    tone({ freq: 500, freqTo: 180, dur: 0.8, gain: 0.06, attack: 0.05 });
+    chime(randInt(2, 6), { gain: 0.07, dur: 0.9 });
+  }
+
   /* 背景でゆっくり鳴りつづける、風鈴のような環境音 */
   function startAmbient() {
     if (ambientTimer) return;
@@ -180,6 +193,6 @@ const AudioSys = (() => {
   return {
     unlock, setMuted, isMuted,
     chime, sparkleTick, boing, absorb, shimmer, formationChord,
-    planetVoice, bloom, fanfare, twinkle
+    planetVoice, bloom, fanfare, twinkle, whaleSong, exhale
   };
 })();

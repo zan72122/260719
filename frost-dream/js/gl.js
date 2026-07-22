@@ -212,7 +212,7 @@ class GLRenderer {
     gl.uniform2f(this.pointProg.u.uRes, this.W, this.H);
     gl.uniform1f(this.pointProg.u.uSizeScale, this.dpr * 0.5);
     gl.uniform1f(this.pointProg.u.uFall, 1.5);
-    gl.uniform1f(this.pointProg.u.uIntensity, 0.38);
+    gl.uniform1f(this.pointProg.u.uIntensity, 0.26);
     this._bindVerts(this.pointProg);
     gl.drawArrays(gl.POINTS, 0, n);
 
@@ -250,7 +250,7 @@ class GLRenderer {
     gl.uniform2f(this.pointProg.u.uRes, this.W, this.H);
     gl.uniform1f(this.pointProg.u.uSizeScale, this.dpr * 0.62);
     gl.uniform1f(this.pointProg.u.uFall, 2.6);
-    gl.uniform1f(this.pointProg.u.uIntensity, 0.85);
+    gl.uniform1f(this.pointProg.u.uIntensity, 0.62);
     this._bindVerts(this.pointProg);
     gl.drawArrays(gl.POINTS, 0, n);
 

@@ -46,6 +46,11 @@
   let planets = [];
   let rivers = [];
   let pulses = [];
+  let waves = [];                      // お祝いの色の洪水
+  let whale = null;                    // 主役のくじら
+  let whaleT = rand(7, 14);
+  let whaleSongT = -9;
+  let whaleWakeT = 0;
   const touches = new Map();
   let auroras = [];
   let auroraDefs = [];
@@ -96,17 +101,20 @@
     Formations.releaseAll(sim);
     rivers = [];
     pulses = [];
+    waves = [];
+    whale = null;
+    whaleT = rand(6, 12);
     hint = null;
     idleT = 0;
     bannerT = 0;
     fullPlanets = 0;
-    animalT = rand(25, 45);
+    animalT = rand(50, 80);
     setupAuroras();
 
     planets = [];
     const k = theme.species.length;
     const swarmPer = Math.floor((N - Math.floor(N * 0.3)) / k);
-    const quota = clamp(Math.round(swarmPer * 0.42), 120, 850);
+    const quota = clamp(Math.round(swarmPer * 0.5), 150, 1400);
     const a0 = rand(TAU);
     for (let i = 0; i < k; i++) {
       const a = a0 + i * TAU / k;
@@ -177,7 +185,63 @@
   }
 
   const TAP_SYMBOLS = ['heart', 'star', 'flower', 'rainbow'];
-  const ANIMALS = ['whale', 'butterfly', 'bird', 'dragon'];
+  const ANIMALS = ['butterfly', 'bird', 'dragon'];   // くじらは主役として常駐
+
+  function pushWave(x, y, colorF, str) {
+    waves.push({ x, y, age: 0, colorF, str: str || 1, life: (Math.hypot(W, H) + 300) / 850 });
+  }
+
+  /* ---- 主役のくじら ---- */
+  function updateWhale(dt, t) {
+    if (whale && !Formations.isActive(whale)) {
+      whale = null;
+      whaleT = rand(22, 45);
+    }
+    if (!whale) {
+      if (state !== 'play') return;
+      whaleT -= dt;
+      if (whaleT > 0) return;
+      const fromLeft = Math.random() < 0.5;
+      const sc = Math.min(W * 0.28, H * 0.38);
+      const swarmN = sim.n - sim.dustN;
+      const pts = Formations.sampleShape('whale', clamp(Math.round(swarmN * 0.35), 800, 2600));
+      const speed = (W + sc * 4.5) / rand(26, 36);
+      whale = Formations.start(sim, {
+        pts,
+        cx: fromLeft ? -sc * 2 : W + sc * 2,
+        cy: H * rand(0.28, 0.55),
+        scale: sc, hold: 9999,
+        driftX: fromLeft ? speed : -speed,
+        flipX: !fromLeft,
+        type: 'whale'
+      });
+      if (whale) {
+        AudioSys.whaleSong();
+        whaleSongT = t;
+      } else {
+        whaleT = 12;
+      }
+      return;
+    }
+    // なでると身をよじって歌う
+    for (const tc of touches.values()) {
+      if (Math.abs(tc.x - whale.cx) < whale.scale * 2.0 &&
+          Math.abs(tc.y - whale.cy) < whale.scale * 1.2) {
+        whale.excite = 1;
+        if (t - whaleSongT > 3.2) {
+          whaleSongT = t;
+          AudioSys.whaleSong();
+        }
+      }
+    }
+    // 尾びれの一振りが群れをかき乱す（航跡の波）
+    whaleWakeT -= dt;
+    if (whaleWakeT <= 0) {
+      whaleWakeT = 0.55;
+      const tailX = whale.cx - 1.55 * whale.scale * whale.flipX;
+      pulses.push({ x: tailX, y: whale.cy, age: 0, sp: 260, str: 0.32, life: 0.8 });
+    }
+  }
 
   /* ---- 入力 ---- */
   function onDown(id, x, y) {
@@ -240,8 +304,12 @@
           return;
         }
       }
-      pulses.push({ x, y, age: 0 });
+      pulses.push({ x, y, age: 0, sp: 480, str: 1, life: 0.95 });
       AudioSys.twinkle();
+    } else if (tc.age > 0.45) {
+      // 集まっていた群れを離す「大きな息」
+      pulses.push({ x, y, age: 0, sp: 640, str: 1.6, life: 1.35 });
+      AudioSys.exhale();
     }
   }
 
@@ -332,7 +400,12 @@
     // 波紋
     for (let i = pulses.length - 1; i >= 0; i--) {
       pulses[i].age += dt;
-      if (pulses[i].age > 0.95) pulses.splice(i, 1);
+      if (pulses[i].age > pulses[i].life) pulses.splice(i, 1);
+    }
+    // 色の洪水波
+    for (let i = waves.length - 1; i >= 0; i--) {
+      waves[i].age += dt;
+      if (waves[i].age > waves[i].life) waves.splice(i, 1);
     }
     // オーロラ
     for (let i = 0; i < 3; i++) {
@@ -353,10 +426,10 @@
       }
     } else if (state === 'play') {
       bannerT += dt;
-      // ときどき、群れが大きな生き物になって泳いでいく
+      // ときどき、くじら以外の生き物も泳いでいく
       animalT -= dt;
       if (animalT <= 0) {
-        animalT = rand(45, 80);
+        animalT = rand(60, 100);
         const fromLeft = Math.random() < 0.5;
         const sc = Math.min(W, H) * rand(0.18, 0.24);
         spawnShape(pick(ANIMALS),
@@ -383,18 +456,24 @@
       fireworkT -= dt;
       if (fireworkT <= 0) {
         fireworkT = rand(0.4, 0.7);
-        pulses.push({ x: rand(W * 0.15, W * 0.85), y: rand(H * 0.15, H * 0.6), age: 0 });
+        const fxp = rand(W * 0.15, W * 0.85), fyp = rand(H * 0.15, H * 0.6);
+        pulses.push({ x: fxp, y: fyp, age: 0, sp: 480, str: 1, life: 0.95 });
         AudioSys.chime(randInt(4, 11), { gain: 0.08 });
+        // 色の洪水を交互に走らせる
+        if (waves.length < 3) {
+          const sp = theme.species[randInt(0, theme.species.length - 1)];
+          pushWave(fxp, fyp, sp.colorF, 0.9);
+        }
       }
       if (celebrateStep === 0 && ct > 0.8) {
         celebrateStep = 1;
-        spawnText('やったね', W / 2, H * 0.42, 0.92, 0.3, 2.6, 2000);
+        spawnText('やったね', W / 2, H * 0.44, 0.96, 0.52, 2.8, 2400);
       }
-      if (celebrateStep === 1 && childName && ct > 4.6) {
+      if (celebrateStep === 1 && childName && ct > 4.8) {
         celebrateStep = 2;
-        spawnText(childName, W / 2, H * 0.42, 0.92, 0.3, 2.6, 2000);
+        spawnText(childName, W / 2, H * 0.44, 0.96, 0.52, 2.8, 2400);
       }
-      const endT = childName ? 8.6 : 5.4;
+      const endT = childName ? 8.8 : 5.6;
       if (ct > endT) { state = 'transition'; fadeDir = 1; }
     } else if (state === 'transition') {
       fadeA += fadeDir * dt / 0.8;
@@ -423,6 +502,7 @@
       events: sim.events
     };
     sim.step(dt, t, env);
+    updateWhale(dt, t);
     Formations.update(sim, dt, t, W, H);
 
     /* イベント処理 */
@@ -437,13 +517,16 @@
             pl.full = true;
             fullPlanets++;
             AudioSys.bloom(pl.noteIdx);
+            // 惑星の色が波になって画面全体を染める
+            pushWave(pl.x, pl.y, pl.colorF, 1.1);
+            pulses.push({ x: pl.x, y: pl.y, age: 0, sp: 560, str: 1.2, life: 1.1 });
             // 数字のフォーメーション（1, 2, 3…）
             const dx = W / 2 - pl.x, dy = H / 2 - pl.y;
             const dl = Math.hypot(dx, dy) || 1;
-            const off = Math.min(W, H) * 0.24;
+            const off = Math.min(W, H) * 0.26;
             spawnText(String(fullPlanets),
               pl.x + dx / dl * off, pl.y + dy / dl * off,
-              0.4, 0.3, 2.0, 900);
+              0.52, 0.42, 2.2, 1300);
           }
         }
       }
@@ -498,8 +581,8 @@
     }
     // 波紋のリング光
     for (const pu of pulses) {
-      const k = 1 - pu.age / 0.95;
-      sim.appendExtra(pu.x, pu.y, 30 + pu.age * 300, 0.3 * k, 0.28 * k, 0.34 * k);
+      const k = (1 - pu.age / pu.life) * Math.min(1, pu.str);
+      sim.appendExtra(pu.x, pu.y, 30 + pu.age * pu.sp * 0.65, 0.3 * k, 0.28 * k, 0.34 * k);
     }
   }
 
@@ -638,7 +721,7 @@
 
     update(dt, elapsed);
 
-    sim.fillVerts(elapsed);
+    sim.fillVerts(elapsed, waves);
     pushExtras(elapsed);
     renderer.render({
       verts: sim.verts,
@@ -659,7 +742,10 @@
     get planets() { return planets; },
     get rivers() { return rivers; },
     formationCount: () => Formations.count(),
-    testText: (s) => spawnText(s, W / 2, H * 0.42, 0.92, 0.3, 3.0, 1800),
+    get whale() { return whale; },
+    forceWhale: () => { whale = null; whaleT = 0; },
+    testWave: () => pushWave(W / 2, H / 2, [1, 0.5, 0.7], 1.1),
+    testText: (s) => spawnText(s, W / 2, H * 0.42, 0.92, 0.5, 3.0, 2200),
     testShape: (n) => spawnShape(n, W / 2, H * 0.45, Math.min(W, H) * 0.2, 3.0)
   };
 

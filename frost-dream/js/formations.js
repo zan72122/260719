@@ -108,21 +108,36 @@ const Formations = (() => {
       g.stroke();
     },
     whale(g) {
-      g.beginPath();
-      g.ellipse(300, 190, 200, 95, -0.06, 0, TAU);   // どう
-      g.fill();
-      g.beginPath();                                  // お
-      g.moveTo(480, 175);
-      g.quadraticCurveTo(560, 150, 600, 90);
-      g.quadraticCurveTo(575, 165, 585, 190);
-      g.quadraticCurveTo(560, 235, 600, 280);
-      g.quadraticCurveTo(555, 235, 480, 215);
-      g.closePath();
-      g.fill();
+      // 右向きのくじら。巨大でも形が読めるように「線画（輪郭の星座）」で描く
+      g.lineWidth = 22;
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.beginPath();                                  // どうの輪郭
+      g.ellipse(340, 195, 195, 90, 0.05, 0, TAU);
+      g.stroke();
+      g.beginPath();                                  // お（尾びれ）
+      g.moveTo(165, 180);
+      g.quadraticCurveTo(85, 150, 45, 95);
+      g.quadraticCurveTo(70, 170, 60, 195);
+      g.quadraticCurveTo(85, 240, 45, 285);
+      g.quadraticCurveTo(90, 240, 165, 215);
+      g.stroke();
+      g.beginPath();                                  // むなびれ
+      g.moveTo(360, 265);
+      g.quadraticCurveTo(330, 320, 280, 330);
+      g.stroke();
       g.beginPath();                                  // しおふき
-      g.arc(200, 62, 16, 0, TAU);
-      g.arc(165, 40, 11, 0, TAU);
+      g.moveTo(430, 95);
+      g.quadraticCurveTo(425, 55, 395, 35);
+      g.moveTo(430, 95);
+      g.quadraticCurveTo(455, 50, 490, 40);
+      g.stroke();
+      g.beginPath();                                  // め（塗り）
+      g.arc(455, 165, 17, 0, TAU);
       g.fill();
+      g.beginPath();                                  // くち
+      g.arc(430, 205, 65, Math.PI * 0.15, Math.PI * 0.5);
+      g.stroke();
     },
     butterfly(g) {
       for (const sd of [-1, 1]) {
@@ -212,6 +227,8 @@ const Formations = (() => {
       driftX: opts.driftX || 0,
       driftY: opts.driftY || 0,
       flipX: opts.flipX ? -1 : 1,
+      type: opts.type || 'shape',
+      excite: 0,           // くじら：なでられた興奮（うねりが大きくなる）
       t: 0,
       state: 'in'          // in → hold → out(解散)
     };
@@ -245,15 +262,31 @@ const Formations = (() => {
         active.splice(a, 1);
         continue;
       }
-      // 目標を更新（呼吸のゆらぎ付き）
+      // 目標を更新（呼吸のゆらぎ付き。くじらは体をうねらせて泳ぐ）
       const m = f.pts.length / 2;
-      for (let k = 0; k < f.idx.length; k++) {
-        const i = f.idx[k];
-        if (sim.mode[i] !== 3) continue;
-        const o = (k % m) * 2;
-        const wob = Math.sin(t * 2.1 + k * 0.61) * 2.6;
-        sim.tgtX[i] = f.cx + f.pts[o] * f.scale * f.flipX + wob;
-        sim.tgtY[i] = f.cy + f.pts[o + 1] * f.scale + Math.cos(t * 1.8 + k * 0.37) * 2.6;
+      if (f.type === 'whale') {
+        f.excite = Math.max(0, f.excite - dt * 0.55);
+        const amp = f.scale * 0.08 * (1 + f.excite * 2.2);
+        const bob = Math.sin(t * 0.8) * f.scale * 0.08;
+        const wspd = 2.6 * (1 + f.excite * 1.4);
+        for (let k = 0; k < f.idx.length; k++) {
+          const i = f.idx[k];
+          if (sim.mode[i] !== 3) continue;
+          const o = (k % m) * 2;
+          const lx = f.pts[o], ly = f.pts[o + 1];
+          sim.tgtX[i] = f.cx + lx * f.scale * f.flipX + Math.sin(t * 2.1 + k * 0.61) * 2.6;
+          sim.tgtY[i] = f.cy + ly * f.scale + bob
+                      + Math.sin(t * wspd - lx * 2.4) * amp * (0.4 + Math.abs(lx) * 0.55);
+        }
+      } else {
+        for (let k = 0; k < f.idx.length; k++) {
+          const i = f.idx[k];
+          if (sim.mode[i] !== 3) continue;
+          const o = (k % m) * 2;
+          const wob = Math.sin(t * 2.1 + k * 0.61) * 2.6;
+          sim.tgtX[i] = f.cx + f.pts[o] * f.scale * f.flipX + wob;
+          sim.tgtY[i] = f.cy + f.pts[o + 1] * f.scale + Math.cos(t * 1.8 + k * 0.37) * 2.6;
+        }
       }
     }
   }
@@ -266,7 +299,8 @@ const Formations = (() => {
   }
 
   function count() { return active.length; }
+  function isActive(f) { return active.indexOf(f) >= 0; }
   function shapeNames() { return Object.keys(SHAPES); }
 
-  return { sampleText, sampleShape, start, update, releaseAll, count, shapeNames, SHAPES };
+  return { sampleText, sampleShape, start, update, releaseAll, count, isActive, shapeNames, SHAPES };
 })();

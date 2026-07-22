@@ -71,16 +71,19 @@ class Sim {
     this.numSpec = sps.length;
     this.dustN = Math.floor(this.n * 0.30);
 
-    // 背景の星屑（大小のボケ玉・明滅）
+    // 大きな循環流の向き（テーマごとにランダム）
+    this.circSign = Math.random() < 0.5 ? -1 : 1;
+
+    // 背景の星屑（大小のボケ玉・明滅）— 群れと同じ流れに参加する
     for (let i = 0; i < this.dustN; i++) {
       this.mode[i] = 1;
       this.px[i] = rand(W);
       this.py[i] = rand(H);
       this.vx[i] = 0; this.vy[i] = 0;
-      const big = Math.random() < 0.18;
-      this.size[i] = big ? rand(5, 13) : rand(0.8, 2.4);
+      const big = Math.random() < 0.3;
+      this.size[i] = big ? rand(7, 18) : rand(1.2, 3.2);
       const gc = theme.glowF[randInt(0, theme.glowF.length - 1)];
-      const b = big ? rand(0.05, 0.12) : rand(0.10, 0.30);
+      const b = big ? rand(0.05, 0.11) : rand(0.10, 0.30);
       const wmix = rand(0.3, 0.8);
       this.colR[i] = (gc[0] * (1 - wmix) + wmix) * b;
       this.colG[i] = (gc[1] * (1 - wmix) + wmix) * b;
@@ -90,30 +93,24 @@ class Sim {
       this.spec[i] = 0;
     }
 
-    // 群れ本体：種ごとに雲のかたまりで出現（自分の惑星からは離れた場所に）
-    const centers = [];
-    for (let s = 0; s < this.numSpec; s++) {
-      let best = null, bestD = -1;
-      for (let tr = 0; tr < 6; tr++) {
-        const cx = rand(W * 0.18, W * 0.82), cy = rand(H * 0.18, H * 0.82);
-        const av = avoid && avoid[s];
-        const d = av ? dist2(cx, cy, av.x, av.y) : 1;
-        if (d > bestD) { bestD = d; best = [cx, cy]; }
-      }
-      centers.push(best);
-    }
+    // 群れ本体：画面いっぱいに広がって出現（自分の惑星の上だけ避ける）
     for (let i = this.dustN; i < this.n; i++) {
       const s = i % this.numSpec;
       this.mode[i] = 0;
       this.spec[i] = s;
-      const c = centers[s];
-      const a = rand(TAU), r = rand(0, Math.min(W, H) * 0.28);
-      this.px[i] = clamp(c[0] + Math.cos(a) * r, 4, W - 4);
-      this.py[i] = clamp(c[1] + Math.sin(a) * r, 4, H - 4);
+      const av = avoid && avoid[s];
+      let x = 0, y = 0;
+      for (let tr = 0; tr < 8; tr++) {
+        x = rand(4, W - 4); y = rand(4, H - 4);
+        if (!av || dist2(x, y, av.x, av.y) > 32400) break; // 180px
+      }
+      this.px[i] = x;
+      this.py[i] = y;
       const va = rand(TAU);
       this.vx[i] = Math.cos(va) * 50;
       this.vy[i] = Math.sin(va) * 50;
-      this.size[i] = Math.random() < 0.06 ? rand(3.6, 5.2) : rand(1.6, 3.2);
+      const sr = Math.random();
+      this.size[i] = sr < 0.7 ? rand(3.2, 5.5) : (sr < 0.95 ? rand(5.5, 7.5) : rand(8, 11));
       const cf = sps[s].colorF;
       const j = rand(0.72, 1.12);
       this.colR[i] = Math.min(1, cf[0] * j + 0.06);
@@ -202,7 +199,7 @@ class Sim {
       const m = mode[i];
 
       if (m === 1) {
-        // 星屑：カールノイズでゆっくり漂う（大きいほど手前で速い）
+        // 星屑：カールノイズ＋世界の循環流でゆっくり漂う（大きいほど手前で速い）
         const k1 = 0.0035, k2 = 0.0011;
         const x = px[i], y = py[i];
         const cxv = Math.sin(x * k1 + t * 0.21) * Math.sin(y * k1 - t * 0.17) * 0.7
@@ -210,8 +207,11 @@ class Sim {
         const cyv = Math.cos(x * k1 - t * 0.13) * Math.sin(y * k1 + t * 0.19) * 0.7
                   + Math.sin(x * k2 - t * 0.08) * 0.5;
         const sp = 4 + this.size[i] * 1.6;
-        px[i] += cxv * sp * dt;
-        py[i] += (cyv * sp - 2.5) * dt;
+        const dxc = x - W * 0.5, dyc = y - H * 0.5;
+        const dc = Math.hypot(dxc, dyc) || 1;
+        const circ = 13 * this.circSign * Math.min(1, dc / (Math.min(W, H) * 0.3)) * (0.4 + this.size[i] * 0.08);
+        px[i] += (cxv * sp - dyc / dc * circ) * dt;
+        py[i] += (cyv * sp - 2.5 + dxc / dc * circ) * dt;
         if (px[i] < -20) px[i] += W + 40;
         if (px[i] > W + 20) px[i] -= W + 40;
         if (py[i] < -20) py[i] += H + 40;
@@ -256,19 +256,28 @@ class Sim {
       const cnt = gCnt[base];
       if (cnt > 1) {
         const inv = 1 / cnt;
-        // 整列
-        fx += (gVx[base] * inv - vx[i]) * 2.4;
-        fy += (gVy[base] * inv - vy[i]) * 2.4;
-        // 結合
+        // 整列（強め＝帯状の流れになる）
+        fx += (gVx[base] * inv - vx[i]) * 2.8;
+        fy += (gVy[base] * inv - vy[i]) * 2.8;
+        // 結合（弱め＝ひと塊にならず画面に広がる）
         const ccx = gSx[base] * inv, ccy = gSy[base] * inv;
-        fx += (ccx - x) * 1.1;
-        fy += (ccy - y) * 1.1;
+        fx += (ccx - x) * 0.55;
+        fy += (ccy - y) * 0.55;
         // 分離（混みすぎたセルでは重心から逃げる）
-        if (cnt > 9) {
-          const over = Math.min(cnt - 9, 45) * 0.5;
+        if (cnt > 8) {
+          const over = Math.min(cnt - 8, 45) * 0.5;
           fx += (x - ccx) * over * 0.12;
           fy += (y - ccy) * over * 0.12;
         }
+      }
+
+      // 世界の大循環：群れ全体が画面を巡る潮流になる
+      {
+        const dxc = x - W * 0.5, dyc = y - H * 0.5;
+        const dc = Math.hypot(dxc, dyc) || 1;
+        const circ = 34 * this.circSign * Math.min(1, dc / (Math.min(W, H) * 0.3));
+        fx += -dyc / dc * circ;
+        fy += dxc / dc * circ;
       }
 
       // カールノイズの流場（夢の中の風）
@@ -321,7 +330,7 @@ class Sim {
         }
       }
 
-      // 指との関係
+      // 指との関係：触れた瞬間、画面じゅうの群れが指に気づいて押し寄せる
       for (let ti = 0; ti < touches.length; ti++) {
         const tc = touches[ti];
         const dx = tc.x - x, dy = tc.y - y;
@@ -333,23 +342,30 @@ class Sim {
             fx -= dx / d * 380 * k;
             fy -= dy / d * 380 * k;
           }
-        } else if (tc.age > 0.3 && d2v < 26896) { // 164px 押しっぱなしで渦
+        } else {
           const d = Math.sqrt(d2v) || 1;
-          const k = 1 - d / 164;
-          fx += (-dy / d) * 260 * k + dx / d * 85 * k;
-          fy += (dx / d) * 260 * k + dy / d * 85 * k;
+          // 全画面に届く引力（川を描いている間は控えめに）
+          const g = (tc.river ? 90 : 300) / (1 + d * 0.004);
+          fx += dx / d * g;
+          fy += dy / d * g;
+          if (tc.age > 0.3 && d < 164) { // 押しっぱなしで近くは渦に
+            const k = 1 - d / 164;
+            fx += (-dy / d) * 260 * k;
+            fy += (dx / d) * 260 * k;
+          }
         }
       }
 
-      // タップの波紋パルス
+      // 波紋パルス（タップ＝小波、指を離した「息」＝大波）
       for (let piv = 0; piv < pulses.length; piv++) {
         const pu = pulses[piv];
-        const R = pu.age * 480;
+        const R = pu.age * pu.sp;
         const dx = x - pu.x, dy = y - pu.y;
         const d = Math.hypot(dx, dy) || 1;
         const band = Math.abs(d - R);
-        if (band < 70 && pu.age < 0.9) {
-          const k = (1 - pu.age / 0.9) * (1 - band / 70);
+        const bw = 70 + pu.str * 30;
+        if (band < bw && pu.age < pu.life) {
+          const k = (1 - pu.age / pu.life) * (1 - band / bw) * pu.str;
           fx += dx / d * 640 * k;
           fy += dy / d * 640 * k;
         }
@@ -373,7 +389,7 @@ class Sim {
               this.orbA[i] = Math.atan2(y - pl.y, x - pl.x);
               this.orbS[i] = rand(1.0, 2.4) * (Math.random() < 0.5 ? -1 : 1);
               this.tgtX[i] = d;
-              this.tgtY[i] = pl.r * rand(1.08, 1.5);
+              this.tgtY[i] = pl.r * rand(1.05, 1.9);
               pl.captured++;
               this.events.push({ type: 'capture', planet: pli });
               captured = true;
@@ -404,7 +420,7 @@ class Sim {
       const damp = 1 - 0.30 * dt;
       vx[i] *= damp; vy[i] *= damp;
       const sp2 = vx[i] * vx[i] + vy[i] * vy[i];
-      if (sp2 > 57600) { const sc = 240 / Math.sqrt(sp2); vx[i] *= sc; vy[i] *= sc; }
+      if (sp2 > 72900) { const sc = 270 / Math.sqrt(sp2); vx[i] *= sc; vy[i] *= sc; }
       else if (sp2 < 576 && sp2 > 0.01) { const sc = 24 / Math.sqrt(sp2); vx[i] *= sc; vy[i] *= sc; }
       px[i] += vx[i] * dt;
       py[i] += vy[i] * dt;
@@ -415,24 +431,49 @@ class Sim {
     }
   }
 
-  /* 頂点バッファへ書き出し。extras は main が appendExtra で追加する */
-  fillVerts(t) {
+  /* 頂点バッファへ書き出し。waves = お祝いの色の洪水（画面全体を波が染める）。
+   * extras は main が appendExtra で追加する */
+  fillVerts(t, waves) {
     const v = this.verts;
     const n = this.n;
+    const nw = waves ? waves.length : 0;
     let j = 0;
     for (let i = 0; i < n; i++) {
-      v[j] = this.px[i];
-      v[j + 1] = this.py[i];
+      const x = this.px[i], y = this.py[i];
+      v[j] = x;
+      v[j + 1] = y;
       let br = 1;
+      let size = this.size[i];
+      let r = this.colR[i], g = this.colG[i], b = this.colB[i];
       if (this.mode[i] === 1) {
         br = 0.55 + 0.45 * Math.sin(t * this.pspd[i] + this.phase[i]);
       } else if (this.mode[i] === 2) {
         br = 0.85 + 0.3 * Math.sin(t * 3 + this.phase[i]);
+      } else if (this.mode[i] === 3) {
+        // フォーメーション中は白く輝かせて、形をくっきり浮かび上がらせる
+        br = 1.5;
+        size *= 1.3;
+        r += (1 - r) * 0.3;
+        g += (1 - g) * 0.3;
+        b += (1 - b) * 0.3;
       }
-      v[j + 2] = this.size[i];
-      v[j + 3] = this.colR[i] * br;
-      v[j + 4] = this.colG[i] * br;
-      v[j + 5] = this.colB[i] * br;
+      for (let w = 0; w < nw; w++) {
+        const wv = waves[w];
+        const band = Math.abs(Math.hypot(x - wv.x, y - wv.y) - wv.age * 850);
+        const bw = 190;
+        if (band < bw) {
+          const k = (1 - band / bw) * wv.str * Math.max(0, 1 - wv.age / wv.life);
+          const mixv = Math.min(0.85, k);
+          r += (wv.colorF[0] - r) * mixv;
+          g += (wv.colorF[1] - g) * mixv;
+          b += (wv.colorF[2] - b) * mixv;
+          br *= 1 + k * 1.4;
+        }
+      }
+      v[j + 2] = size;
+      v[j + 3] = r * br;
+      v[j + 4] = g * br;
+      v[j + 5] = b * br;
       j += 6;
     }
     this.vertCount = n;
