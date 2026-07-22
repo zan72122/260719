@@ -233,6 +233,13 @@ class Sim {
       }
 
       if (m === 2) {
+        // 「世界をにぎる」発動中はリングの粒子も吸い出される
+        if (env.grip && env.grip.k > 0.15) {
+          mode[i] = 0;
+          vx[i] = rand(-80, 80);
+          vy[i] = rand(-80, 80);
+          continue;
+        }
         // 惑星のリングを回る
         const pl = planets[this.pIdx[i]];
         if (!pl) { mode[i] = 0; continue; }
@@ -508,6 +515,24 @@ class Sim {
       if (y < mgn) fy += (mgn - y) * 8;
       if (y > H - mgn) fy -= (y - (H - mgn)) * 8;
 
+      // 世界をにぎる：ほかの力を圧倒して、すべてが一点へ
+      if (env.grip && env.grip.k > 0) {
+        const gk = env.grip.k;
+        fx *= (1 - gk * 0.85);
+        fy *= (1 - gk * 0.85);
+        const dx = env.grip.x - x, dy = env.grip.y - y;
+        const d = Math.hypot(dx, dy) || 1;
+        const w = 900 * gk + 600 * gk * gk;
+        fx += dx / d * w;
+        fy += dy / d * w;
+        if (d < 130) {
+          // 中心では強く減速して、ぎゅっと固まる
+          const damp2 = 1 - Math.min(0.9, 4 * dt * gk);
+          vx[i] *= damp2;
+          vy[i] *= damp2;
+        }
+      }
+
       // 積分
       vx[i] += fx * dt;
       vy[i] += fy * dt;
@@ -580,6 +605,18 @@ class Sim {
     }
   }
 
+  /* ビッグバン：すべての自由な粒子を一点から解き放つ */
+  bigBang(x, y, k) {
+    for (let i = this.dustN; i < this.n; i++) {
+      if (this.mode[i] !== 0) continue;
+      const dx = this.px[i] - x, dy = this.py[i] - y;
+      const d = Math.hypot(dx, dy) || 1;
+      const v = rand(520, 1150) * k;
+      this.vx[i] = dx / d * v + rand(-120, 120);
+      this.vy[i] = dy / d * v + rand(-120, 120);
+    }
+  }
+
   /* 点(x,y)の半径R内の自由な粒子を四方八方に吹き飛ばす（ためた玉の爆発） */
   burstAt(x, y, R) {
     const R2 = R * R;
@@ -600,14 +637,20 @@ class Sim {
   }
 
   /* 頂点バッファへ書き出し。waves = お祝いの色の洪水（画面全体を波が染める）。
+   * grip = 世界をにぎる（星屑は見た目だけ吸い込まれ、離すと元の空へ帰る）。
    * extras は main が appendExtra で追加する */
-  fillVerts(t, waves) {
+  fillVerts(t, waves, grip) {
     const v = this.verts;
     const n = this.n;
     const nw = waves ? waves.length : 0;
+    const gk = grip ? grip.k * grip.k * 0.94 : 0;
     let j = 0;
     for (let i = 0; i < n; i++) {
-      const x = this.px[i], y = this.py[i];
+      let x = this.px[i], y = this.py[i];
+      if (gk > 0.01 && this.mode[i] === 1) {
+        x += (grip.x - x) * gk;
+        y += (grip.y - y) * gk;
+      }
       v[j] = x;
       v[j + 1] = y;
       let br = 1;

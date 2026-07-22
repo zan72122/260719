@@ -63,6 +63,14 @@
   let rainWaveT = 0;
   let rainIdx = 0;
   let curBridges = null;
+  /* 世界をにぎる（ピンチイン）：強力すぎるので頻発できない */
+  const grip = {
+    phase: 'idle',        // idle | gripping
+    x: 0, y: 0, k: 0,
+    holdT: 0,
+    cool: 25,             // 最初は開始25秒後から。使用後は75秒
+    d0: 0, tracking: false, lockUntilLift: false
+  };
   const RAINBOWF = ['#ff6b8a', '#ffab70', '#ffd76e', '#a5e878', '#7db8ff', '#c9a2ff']
     .map(h => hexToRgb(h).map(v => v / 255));
   const touches = new Map();
@@ -406,7 +414,7 @@
     tc.tvy = lerp(tc.tvy, (y - tc.y) / mdt, 0.45);
     tc.moved += Math.hypot(x - tc.x, y - tc.y);
     tc.x = x; tc.y = y;
-    if (!tc.river && tc.moved > 16) {
+    if (!tc.river && tc.moved > 16 && !tc.isPinch) {
       // 光の川をつくる（3本まで・古いものから溶ける）
       while (rivers.filter(r => !r.evicted).length >= 3) {
         const old = rivers.find(r => !r.evicted);
@@ -503,6 +511,59 @@
       pulses.push({ x, y, age: 0, sp: 640, str: 1.6, life: 1.35 });
       AudioSys.exhale();
     }
+  }
+
+  /* ---- 世界をにぎる：開始と解放 ---- */
+  function startGrip(tlist) {
+    grip.phase = 'gripping';
+    grip.k = 0;
+    grip.holdT = 0;
+    grip.x = (tlist[0].x + tlist[1].x) / 2;
+    grip.y = (tlist[0].y + tlist[1].y) / 2;
+    // ピンチの指が作りかけた川は消す
+    for (const tc of tlist) {
+      tc.isPinch = true;
+      if (tc.river) {
+        tc.river.evicted = true;
+        tc.river.alpha = 0;
+        tc.river = null;
+      }
+    }
+    // くじらも文字も、みんな吸い込まれて玉になる
+    Formations.releaseAll(sim);
+    director.last = elapsed;
+  }
+
+  function releaseGrip() {
+    const k = grip.k;
+    const gx = grip.x, gy = grip.y;
+    grip.phase = 'idle';
+    grip.tracking = false;
+    grip.lockUntilLift = true;
+    grip.holdT = 0;
+    if (k < 0.35) {
+      // 握りかけてやめた：小さな息だけ。クールダウンも少しだけ
+      grip.k = 0;
+      grip.cool = Math.max(grip.cool, 6);
+      pulses.push({ x: gx, y: gy, age: 0, sp: 500, str: 0.8, life: 0.9 });
+      AudioSys.exhale();
+      return;
+    }
+    // ビッグバン！
+    grip.k = 0;
+    grip.cool = 75;
+    sim.bigBang(gx, gy, k);
+    pulses.push({ x: gx, y: gy, age: 0, sp: 950, str: 2.6, life: 1.7 });
+    for (let i = 0; i < 3; i++) {
+      const c = RAINBOWF[randInt(0, RAINBOWF.length - 1)];
+      waves.push({ x: gx, y: gy, age: -i * 0.22, colorF: c, str: 0.9, life: (Math.hypot(W, H) + 300) / 850 });
+    }
+    flashA = 1;
+    shake(16);
+    slowmo(0.85);
+    AudioSys.bigBang();
+    powerOn();
+    director.last = elapsed;
   }
 
   /* くじらタップ → 3回でブリーチ（大ジャンプ→着水スプラッシュ） */
@@ -604,7 +665,7 @@
       if (state !== 'play' && state !== 'celebrate') continue;
       const still = Math.hypot(tc.tvx, tc.tvy) < 55;
       // 心拍：静かに押さえていると、玉が脈打って小さな波を放つ
-      if (still && tc.age > 0.6) {
+      if (still && tc.age > 0.6 && !tc.isPinch) {
         tc.beatT += dt;
         if (tc.beatT >= 1.15) {
           tc.beatT = 0;
@@ -617,7 +678,7 @@
       }
       // ため：集まった密度が上がるほど震え、音が上がり、満タンで大爆発
       // （どんなに密でも2.5秒はかけて溜まる＝ワクワクの時間を保証）
-      if (tc.age > 0.5 && tc.chargeCool <= 0) {
+      if (tc.age > 0.5 && tc.chargeCool <= 0 && still && !tc.river && !tc.isPinch) {
         const cnt = sim.countNear(tc.x, tc.y, 120);
         const need = Math.max(350, sim.freeCount * 0.38);
         tc.charge = Math.min(clamp(cnt / need, 0, 1), (tc.age - 0.5) / 2.5);
@@ -802,10 +863,50 @@
       }
     }
 
-    /* 2本指のひかりのはし・3本指のにじのあめ */
+    /* ---- 世界をにぎる（ピンチイン検知と状態遷移） ---- */
     const tlist = [...touches.values()];
+    grip.cool = Math.max(0, grip.cool - dt);
+    if (tlist.length < 2) grip.lockUntilLift = false;
+    if (state === 'title' || state === 'transition') {
+      grip.tracking = false;
+      if (grip.phase === 'gripping') { grip.phase = 'idle'; grip.k = 0; }
+    } else if (grip.phase === 'gripping') {
+      if (tlist.length >= 2) {
+        // 握りつづけている：中心を追従し、力が満ちていく
+        grip.x = (tlist[0].x + tlist[1].x) / 2;
+        grip.y = (tlist[0].y + tlist[1].y) / 2;
+        grip.k = Math.min(1, grip.k + dt / 0.9);
+        if (grip.k >= 1) grip.holdT += dt;
+        shake(1 + grip.k * 2.5);
+        AudioSys.rumble(grip.k);
+        if (grip.holdT > 4) releaseGrip();      // ずっとは握れない
+      } else {
+        releaseGrip();
+      }
+    } else if (tlist.length === 2 && !grip.lockUntilLift) {
+      const d = Math.hypot(tlist[0].x - tlist[1].x, tlist[0].y - tlist[1].y);
+      if (!grip.tracking) {
+        grip.tracking = true;
+        grip.d0 = d;
+      } else if (grip.d0 > 170 && d < grip.d0 * 0.72 &&
+                 tlist[0].age < 1.4 && tlist[1].age < 1.4) {
+        if (grip.cool > 0) {
+          // まだ力がたまっていない：世界が小さく震えて「まだだよ」
+          AudioSys.deny();
+          shake(1.6);
+          grip.lockUntilLift = true;
+        } else {
+          startGrip(tlist);
+        }
+      }
+    } else {
+      grip.tracking = false;
+    }
+
+    /* 2本指のひかりのはし・3本指のにじのあめ */
     curBridges = null;
-    if (state !== 'title' && tlist.length === 2 &&
+    if (state !== 'title' && grip.phase !== 'gripping' &&
+        tlist.length === 2 && !grip.lockUntilLift &&
         tlist[0].age > 0.15 && tlist[1].age > 0.15) {
       curBridges = [{ x1: tlist[0].x, y1: tlist[0].y, x2: tlist[1].x, y2: tlist[1].y }];
     }
@@ -835,6 +936,7 @@
       power: power.k,                  // ひかりのちから
       bridges: curBridges,
       rain: rainK > 0.02 ? rainK : 0,
+      grip: grip.phase === 'gripping' ? grip : null,   // 世界をにぎる
       events: sim.events
     };
     sim.step(dt, t, env);
@@ -907,10 +1009,23 @@
         sim.appendExtra(pl.x, pl.y, rr * (4.6 + Math.sin(t * 2.2) * 0.5), r * 0.12, g * 0.12, b * 0.12);
       }
     }
-    // 私の星（タップで生まれて残りつづける星座）
+    // 私の星（タップで生まれて残りつづける星座。にぎると一緒に吸い込まれ、帰ってくる）
+    const gE = grip.phase === 'gripping' ? grip.k * grip.k * 0.94 : 0;
     for (const st of myStars) {
       const tw = 0.5 + 0.5 * Math.sin(t * 2 + st.ph);
-      sim.appendExtra(st.x, st.y, st.s * 4.5, 0.55 * tw, 0.5 * tw, 0.34 * tw);
+      sim.appendExtra(
+        st.x + (grip.x - st.x) * gE,
+        st.y + (grip.y - st.y) * gE,
+        st.s * 4.5, 0.55 * tw, 0.5 * tw, 0.34 * tw);
+    }
+    // にぎった世界の玉（震えながら光が満ちていく）
+    if (grip.phase === 'gripping' && grip.k > 0.02) {
+      const gk = grip.k;
+      const tr = Math.sin(t * 22) * 10 * gk;
+      sim.appendExtra(grip.x, grip.y, 170 + gk * 210 + tr, 0.5 * gk, 0.47 * gk, 0.6 * gk);
+      sim.appendExtra(grip.x, grip.y, 85 + gk * 115 + tr, 0.9, 0.88, 0.95);
+      const rc = RAINBOWF[Math.floor(t * 7) % RAINBOWF.length];
+      sim.appendExtra(grip.x, grip.y, 48 + gk * 62, rc[0], rc[1], rc[2]);
     }
     // 指の下の光（ためるほど大きく白く、心拍で脈打つ。ひかりのちから中は虹色）
     for (const tc of touches.values()) {
@@ -1124,7 +1239,7 @@
 
     update(dt, elapsed);
 
-    sim.fillVerts(elapsed, waves);
+    sim.fillVerts(elapsed, waves, grip.phase === 'gripping' ? grip : null);
     pushExtras(elapsed);
     renderer.render({
       verts: sim.verts,
@@ -1165,6 +1280,8 @@
     get power() { return power; },
     get myStars() { return myStars; },
     get combo() { return comboN; },
+    get grip() { return grip; },
+    gripReady: () => { grip.cool = 0; },
     get touchList() { return [...touches.values()]; },
     forceWhale: () => { whale = null; whaleT = 0; },
     fireNow: () => fireDirector(elapsed),

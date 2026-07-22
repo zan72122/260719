@@ -277,6 +277,41 @@ const AudioSys = (() => {
     chime(4, { delay: 0.18, gain: 0.06, dur: 1.0 });
   }
 
+  /* 世界をにぎる：ゴゴゴ…という唸り（毎フレーム呼んでよい・内部で間引く） */
+  let lastRumble = 0;
+  function rumble(k) {
+    if (!ctx || muted) return;
+    const now2 = ctx.currentTime;
+    if (now2 - lastRumble < 0.15) return;
+    lastRumble = now2;
+    tone({ freq: 42 + k * 26, dur: 0.3, gain: 0.05 + k * 0.11, attack: 0.05 });
+    if (Math.random() < k * 0.5) {
+      tone({ freq: 84 + k * 40, dur: 0.2, gain: 0.03, attack: 0.03 });
+    }
+  }
+
+  /* 世界をにぎってからの、ビッグバン */
+  function bigBang() {
+    tone({ freq: 58, freqTo: 24, dur: 1.3, gain: 0.3 });
+    whoosh(1.2, 0.22, 1500, 60);
+    whoosh(0.7, 0.09, 500, 3200, 0.3);
+    const seq = [0, 4, 7, 9, 12, 14];
+    for (let i = 0; i < seq.length; i++) {
+      chime(seq[i], { delay: 0.35 + i * 0.09, gain: 0.15, dur: 1.0 });
+    }
+  }
+
+  /* まだ使えないよ、のやさしい合図 */
+  let lastDeny = 0;
+  function deny() {
+    if (!ctx || muted) return;
+    const now2 = ctx.currentTime;
+    if (now2 - lastDeny < 1.4) return;
+    lastDeny = now2;
+    tone({ freq: 220, freqTo: 165, dur: 0.25, gain: 0.06 });
+    tone({ freq: 165, freqTo: 130, dur: 0.3, gain: 0.05, delay: 0.18 });
+  }
+
   /* 背景でゆっくり鳴りつづける、風鈴のような環境音 */
   function startAmbient() {
     if (ambientTimer) return;
@@ -298,6 +333,7 @@ const AudioSys = (() => {
     chime, sparkleTick, boing, absorb, shimmer, formationChord,
     planetVoice, bloom, fanfare, twinkle, whaleSong, exhale,
     heartBeat, chargeTick, bigBoom, geyser, gust, comet,
-    whaleChirp, splash, giggle, powerUp, powerDown
+    whaleChirp, splash, giggle, powerUp, powerDown,
+    rumble, bigBang, deny
   };
 })();
