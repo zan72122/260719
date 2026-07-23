@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>ちょきちょきのき</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="ui">
+  <div id="goalbar"></div>
+  <button id="btnHome" class="cbtn" aria-label="ホーム">🏠</button>
+  <button id="btnReplant" class="cbtn" aria-label="はじめから">🌱</button>
+  <button id="btnSound" class="cbtn" aria-label="おと">🔊</button>
+</div>
+
+<div id="hint" class="hidden">
+  <span id="hintFinger">👆</span>
+  <span id="hintText"></span>
+</div>
+
+<div id="titleScreen" class="screen">
+  <div class="title-deco">🌸 🌳 🌸</div>
+  <h1 id="title">
+    <span>ち</span><span>ょ</span><span>き</span><span>ち</span><span>ょ</span><span>き</span><span>の</span><span>き</span>
+  </h1>
+  <p class="subtitle">きって　そだてて　はなを　さかせよう</p>
+  <button id="btnStart">はじめる 🌱</button>
+  <div id="levelDots"></div>
+</div>
+
+<div id="clearScreen" class="screen hidden">
+  <div id="clearFlower">🌸</div>
+  <div id="clearText">できた！</div>
+  <button id="btnNext">つぎへ ▶</button>
+</div>
+
+<script src="js/sound.js"></script>
+<script src="js/levels.js"></script>
+<script src="js/tree.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
