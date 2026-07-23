@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffd6e7">
+<title>わくわく！じんせいランド</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ================= タイトル・キャラえらび ================= -->
+<div id="home" class="screen">
+  <div class="sky-deco" aria-hidden="true">
+    <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
+    <span class="balloon b1">🎈</span><span class="balloon b2">🎈</span>
+    <span class="twinkle t1">✨</span><span class="twinkle t2">⭐</span><span class="twinkle t3">🌟</span>
+  </div>
+
+  <h1 id="title">
+    <span>わ</span><span>く</span><span>わ</span><span>く</span><span class="small">！</span><span>じ</span><span>ん</span><span>せ</span><span>い</span><span>ラ</span><span>ン</span><span>ド</span>
+  </h1>
+  <p class="subtitle">🎡 くるまで すすむ すごろくの くに 🎡</p>
+
+  <section class="pick">
+    <h2>だれで あそぶ？</h2>
+    <div class="chars">
+      <button class="charBtn" data-char="usagi"><span class="face">🐰</span><span class="cname">うさぎ</span></button>
+      <button class="charBtn" data-char="kuma"><span class="face">🐻</span><span class="cname">くま</span></button>
+      <button class="charBtn" data-char="neko"><span class="face">🐱</span><span class="cname">ねこ</span></button>
+      <button class="charBtn" data-char="panda"><span class="face">🐼</span><span class="cname">ぱんだ</span></button>
+    </div>
+  </section>
+
+  <section class="pick">
+    <h2>どうやって あそぶ？</h2>
+    <div class="modes">
+      <button class="modeBtn" data-mode="solo"><span class="micon">🚗</span><span>ひとりで</span></button>
+      <button class="modeBtn" data-mode="cpu"><span class="micon">🤖</span><span>ともだちと</span></button>
+      <button class="modeBtn" data-mode="two"><span class="micon">👦👧</span><span>ふたりで</span></button>
+    </div>
+  </section>
+
+  <button id="startBtn">🎲 しゅっぱーつ！</button>
+</div>
+
+<!-- ================= ふたりめの キャラえらび ================= -->
+<div id="pick2" class="screen hidden">
+  <h2 class="pick2Title">ふたりめは だれ？</h2>
+  <div class="chars" id="chars2"></div>
+</div>
+
+<!-- ================= ゲーム ================= -->
+<div id="game" class="screen hidden">
+  <div id="stage"></div>
+
+  <div id="hud">
+    <div id="badges"></div>
+    <button id="homeBtn" aria-label="おわる">🏠</button>
+    <button id="muteBtn" aria-label="おと">🔊</button>
+  </div>
+
+  <div id="banner" class="hidden"></div>
+
+  <div id="rouletteWrap">
+    <div id="rouletteHint">タッチで まわしてね！</div>
+    <canvas id="roulette" width="480" height="480"></canvas>
+  </div>
+</div>
+
+<!-- ================= けっか ================= -->
+<div id="result" class="screen hidden">
+  <div class="resultCard">
+    <div id="resultTitle">🎉 ゴール！ 🎉</div>
+    <div id="resultRows"></div>
+    <div class="resultBtns">
+      <button id="againBtn">🔁 もういちど</button>
+      <button id="backBtn">🏠 さいしょから</button>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/util.js"></script>
+<script src="js/world.js"></script>
+<script src="js/characters.js"></script>
+<script src="js/effects.js"></script>
+<script src="js/roulette.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
