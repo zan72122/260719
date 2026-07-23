@@ -352,6 +352,8 @@ window.GAMES.mixer = (() => {
     });
 
     if (window.__dbgMX) window.__dbgMX({
+      drag: dragObj === 'jar' ? 'jar' : (dragObj ? 'obj' : null),
+      near: !!jarG.userData.nearGlass, rotz: +jarG.rotation.z.toFixed(2),
       inJar: inJar.length, lid: lidOn, blend: +blend.toFixed(2),
       liquid: +liquid.toFixed(2), spin: +spinV.toFixed(1),
       col: juiceCol.getHexString(),
