@@ -90,6 +90,21 @@ const FX = (() => {
         sprites.push({ sp, age: 0, life: 1.3, vy: 2.6 });
       },
 
+      /* えもじが ふわふわ うかぶ（ハートなど） */
+      emojiBurst(pos, emoji, n, scale) {
+        n = n || 5;
+        for (let i = 0; i < n; i++) {
+          const tex = U.emojiTexture(emoji, 96);
+          const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+          const sp = new THREE.Sprite(mat);
+          const s = scale || 1.4;
+          sp.scale.set(s, s, 1);
+          sp.position.copy(pos).add(new THREE.Vector3(U.rand(-1.6, 1.6), U.rand(0.2, 1.4), U.rand(-1.6, 1.6)));
+          scene.add(sp);
+          sprites.push({ sp, age: -i * 0.12, life: 1.5, vy: U.rand(1.6, 2.6), sway: U.rand(2, 4) });
+        }
+      },
+
       /* おんぷ */
       notes(pos) {
         for (let i = 0; i < 5; i++) {

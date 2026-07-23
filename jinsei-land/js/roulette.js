@@ -2,7 +2,21 @@
 const Roulette = (() => {
 
   const SEG = 6;
-  const COLORS = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#b197fc'];
+  /* モードごとの みため */
+  const MODES = {
+    normal: {
+      colors: ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#b197fc'],
+      prefix: '', faceIdle: '😊', faceSpin: '😆', text: '#5c4a55', pointer: '#ff5d8f',
+    },
+    minus: {
+      colors: ['#5c6bc0', '#3f51a5', '#7986cb', '#44509e', '#6272c4', '#39458c'],
+      prefix: '-', faceIdle: '😖', faceSpin: '😵', text: '#ffffff', pointer: '#37474f',
+    },
+    wind: {
+      colors: ['#4dd0c4', '#26a69a', '#80cbc4', '#2bbbad', '#5fd3c7', '#1f9e93'],
+      prefix: '', faceIdle: '🌀', faceSpin: '😵‍💫', text: '#0b4f4a', pointer: '#00897b',
+    },
+  };
   /* うえ（ポインタ位置）に くる 数字を きめる ためのならび */
   const NUMBERS = [1, 2, 3, 4, 5, 6];
 
@@ -12,6 +26,7 @@ const Roulette = (() => {
     const cx = W / 2, cy = H / 2 + 14;
     const R = W / 2 - 34;
 
+    let mode = 'normal';
     let angle = 0;            /* いまの かいてん かく */
     let vel = 0;              /* かく そくど */
     let spinning = false;
@@ -34,17 +49,18 @@ const Roulette = (() => {
     }
 
     function draw() {
+      const M = MODES[mode] || MODES.normal;
       ctx.clearRect(0, 0, W, H);
 
       /* そとわく */
       ctx.beginPath();
       ctx.arc(cx, cy, R + 16, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = mode === 'minus' ? '#cfd5ee' : '#ffffff';
       ctx.fill();
       ctx.beginPath();
       ctx.arc(cx, cy, R + 16, 0, Math.PI * 2);
       ctx.lineWidth = 6;
-      ctx.strokeStyle = '#f1dede';
+      ctx.strokeStyle = mode === 'minus' ? '#8c96c8' : '#f1dede';
       ctx.stroke();
 
       /* まわりの でんきゅう */
@@ -52,7 +68,9 @@ const Roulette = (() => {
         const a = i / 12 * Math.PI * 2 + angle * 0.3;
         ctx.beginPath();
         ctx.arc(cx + Math.cos(a) * (R + 16), cy + Math.sin(a) * (R + 16), 5, 0, Math.PI * 2);
-        ctx.fillStyle = i % 2 ? '#ffd43b' : '#ff8fb1';
+        ctx.fillStyle = mode === 'minus'
+          ? (i % 2 ? '#9fa8da' : '#7986cb')
+          : (i % 2 ? '#ffd43b' : '#ff8fb1');
         ctx.fill();
       }
 
@@ -66,7 +84,7 @@ const Roulette = (() => {
         ctx.moveTo(cx, cy);
         ctx.arc(cx, cy, R, a0, a1);
         ctx.closePath();
-        ctx.fillStyle = COLORS[i];
+        ctx.fillStyle = M.colors[i];
         ctx.fill();
         ctx.lineWidth = 4;
         ctx.strokeStyle = '#ffffff';
@@ -74,20 +92,21 @@ const Roulette = (() => {
 
         /* すうじ */
         const mid = (a0 + a1) / 2;
+        const label = M.prefix + NUMBERS[i];
         ctx.save();
         ctx.translate(cx + Math.cos(mid) * R * 0.64, cy + Math.sin(mid) * R * 0.64);
         ctx.rotate(mid + Math.PI / 2);
-        ctx.font = 'bold 64px "Hiragino Maru Gothic ProN", sans-serif';
+        ctx.font = 'bold ' + (M.prefix ? 52 : 64) + 'px "Hiragino Maru Gothic ProN", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.lineWidth = 10;
-        ctx.strokeStyle = 'rgba(255,255,255,.9)';
-        ctx.strokeText(String(NUMBERS[i]), 0, 0);
-        ctx.fillStyle = '#5c4a55';
-        ctx.fillText(String(NUMBERS[i]), 0, 0);
+        ctx.strokeStyle = mode === 'minus' ? 'rgba(30,35,70,.65)' : 'rgba(255,255,255,.9)';
+        ctx.strokeText(label, 0, 0);
+        ctx.fillStyle = M.text;
+        ctx.fillText(label, 0, 0);
         if (NUMBERS[i] === 6) {
           /* 「9」と まちがえない ように したせん */
-          ctx.strokeStyle = '#5c4a55';
+          ctx.strokeStyle = M.text;
           ctx.lineWidth = 6;
           ctx.beginPath();
           ctx.moveTo(-20, 40); ctx.lineTo(20, 40);
@@ -102,12 +121,12 @@ const Roulette = (() => {
       ctx.fillStyle = '#ffffff';
       ctx.fill();
       ctx.lineWidth = 5;
-      ctx.strokeStyle = '#ffd43b';
+      ctx.strokeStyle = mode === 'minus' ? '#7986cb' : '#ffd43b';
       ctx.stroke();
       ctx.font = (R * 0.3) + 'px "Apple Color Emoji","Segoe UI Emoji",sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(spinning ? '😆' : '😊', cx, cy + 4);
+      ctx.fillText(spinning ? M.faceSpin : M.faceIdle, cx, cy + 4);
 
       /* ポインタ（うえの さんかく） */
       ctx.beginPath();
@@ -115,7 +134,7 @@ const Roulette = (() => {
       ctx.lineTo(cx + 22, cy - R - 24);
       ctx.lineTo(cx, cy - R + 12);
       ctx.closePath();
-      ctx.fillStyle = '#ff5d8f';
+      ctx.fillStyle = M.pointer;
       ctx.fill();
       ctx.lineWidth = 4;
       ctx.strokeStyle = '#ffffff';
@@ -234,6 +253,9 @@ const Roulette = (() => {
       },
       setEnabled(b) { enabled = b; },
       isSpinning() { return spinning; },
+      /* normal | minus(-1〜-6) | wind(たつまき) */
+      setMode(m) { mode = MODES[m] ? m : 'normal'; resultSeg = -1; },
+      getMode() { return mode; },
     };
   }
 

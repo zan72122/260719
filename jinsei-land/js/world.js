@@ -5,20 +5,45 @@ const World = (() => {
   const T = {
     START: 'start', GOAL: 'goal', STAR: 'star', PRESENT: 'present',
     BANANA: 'banana', ROCKET: 'rocket', MUSIC: 'music', CAKE: 'cake', RAINBOW: 'rainbow',
+    SHOP: 'shop', JOB: 'job', WEDDING: 'wedding', BABY: 'baby',
+    THUNDER: 'thunder', HOLE: 'hole', COASTER: 'coaster', TORNADO: 'tornado',
   };
 
+  /* じんせいの ながれ：
+     あかちゃんゾーン(1-11) → こどもゾーン(12-23) → おとなゾーン(24-35) → おじいちゃんゾーン(36-46) */
   const SPECIALS = {
-    5: T.PRESENT, 16: T.PRESENT, 28: T.PRESENT, 40: T.PRESENT,
-    7: T.ROCKET, 26: T.ROCKET,
-    9: T.MUSIC, 21: T.MUSIC, 34: T.MUSIC,
-    12: T.BANANA, 30: T.BANANA, 42: T.BANANA,
-    14: T.CAKE, 37: T.CAKE,
-    19: T.RAINBOW, 44: T.RAINBOW,
+    3: T.SHOP,       /* はじめての おもちゃやさん */
+    5: T.PRESENT,
+    7: T.ROCKET,
+    9: T.MUSIC,
+    11: T.HOLE,      /* おおあな → どうくつ たんけん */
+    13: T.JOB,       /* はじめての おしごと */
+    14: T.CAKE,
+    16: T.PRESENT,
+    18: T.THUNDER,   /* あめあめ マイナスルーレット */
+    19: T.RAINBOW,
+    21: T.MUSIC,
+    22: T.COASTER,   /* ジェットコースターで おとなゾーンへ */
+    24: T.JOB,       /* おしごと チェンジ */
+    26: T.SHOP,      /* おおきな おかいもの */
+    28: T.WEDDING,
+    30: T.BANANA,
+    32: T.BABY,
+    34: T.MUSIC,
+    35: T.PRESENT,
+    36: T.THUNDER,
+    37: T.CAKE,
+    40: T.TORNADO,   /* たつまき ひっこし */
+    42: T.SHOP,      /* さいごの おかいもの */
+    43: T.BANANA,
+    44: T.RAINBOW,
   };
 
   const TYPE_EMOJI = {
     [T.START]: '🏁', [T.GOAL]: '👑', [T.PRESENT]: '🎁', [T.BANANA]: '🍌',
     [T.ROCKET]: '🚀', [T.MUSIC]: '🎵', [T.CAKE]: '🎂', [T.RAINBOW]: '🌈',
+    [T.SHOP]: '🛒', [T.JOB]: '💼', [T.WEDDING]: '💒', [T.BABY]: '🍼',
+    [T.THUNDER]: '⛈️', [T.HOLE]: '🕳️', [T.COASTER]: '🎢', [T.TORNADO]: '🌪️',
   };
 
   /* 4つの くに：はなばたけ → うみ → おかしのくに → ゆきのくに */
@@ -436,6 +461,14 @@ const World = (() => {
       else if (type === T.CAKE) color = 0xffdcc2;
       else if (type === T.MUSIC) color = 0xd0bfff;
       else if (type === T.RAINBOW) color = 0xc3fae8;
+      else if (type === T.SHOP) color = 0xffd8a8;
+      else if (type === T.JOB) color = 0xbac8ff;
+      else if (type === T.WEDDING) color = 0xffdeeb;
+      else if (type === T.BABY) color = 0xfff0f6;
+      else if (type === T.THUNDER) color = 0x8f9bc4;   /* ちょっと くらい いろ */
+      else if (type === T.HOLE) color = 0xa1887f;
+      else if (type === T.COASTER) color = 0xffec99;
+      else if (type === T.TORNADO) color = 0x96e6d8;
       else color = TILE_COLORS[i % TILE_COLORS.length];
 
       const big = (type === T.START || type === T.GOAL);
@@ -493,6 +526,232 @@ const World = (() => {
     rb.rotation.y = cas.rotation.y;
     rb.position.y = 0.3;
     scene.add(rb);
+
+    /* ---------- せいちょうゲート（ゾーンの さかいめ） ---------- */
+    world.gates = [];
+    for (const b of [11, 23, 35]) {
+      const u = (b + 0.5) / (TILE_COUNT - 1);
+      const p = curve.getPointAt(u);
+      const tan = curve.getTangentAt(u);
+      const gateG = new THREE.Group();
+      for (const sx of [-2.4, 2.4]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 3.4, 10), lambert(0xffffff));
+        pole.position.set(sx, 1.7, 0);
+        gateG.add(pole);
+      }
+      /* ほしの アーチ */
+      const starGeoS = new THREE.OctahedronGeometry(0.26);
+      const starsArc = [];
+      for (let k = 0; k <= 8; k++) {
+        const a = Math.PI * k / 8;
+        const sm = new THREE.Mesh(starGeoS, new THREE.MeshBasicMaterial({ color: k % 2 ? 0xffd43b : 0xff8fb1 }));
+        sm.position.set(Math.cos(a) * 2.4, 3.4 + Math.sin(a) * 1.3, 0);
+        gateG.add(sm);
+        starsArc.push(sm);
+      }
+      gateG.position.set(p.x, 0, p.z);
+      gateG.rotation.y = Math.atan2(tan.x, tan.z) + Math.PI / 2;
+      scene.add(gateG);
+      world.gates.push({ boundary: b, group: gateG, pos: p.clone() });
+      world.anims.push(t => {
+        starsArc.forEach((sm, k) => {
+          sm.rotation.y = t * 2 + k;
+          sm.scale.setScalar(1 + Math.sin(t * 4 + k) * 0.25);
+        });
+      });
+    }
+
+    /* ---------- ジェットコースター（22 → 27） ---------- */
+    (function buildCoaster() {
+      const a = world.tiles[22].pos, b = world.tiles[27].pos;
+      const mid = a.clone().add(b).multiplyScalar(0.5);
+      const dir = b.clone().sub(a).normalize();
+      const side = dir.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+      const pts = [
+        a.clone().setY(0.6),
+        a.clone().add(dir.clone().multiplyScalar(3)).add(side.clone().multiplyScalar(2)).setY(7.5),
+        mid.clone().add(side.clone().multiplyScalar(7)).setY(3.2),
+        mid.clone().add(side.clone().multiplyScalar(9)).add(dir.clone().multiplyScalar(3)).setY(9.5),
+        b.clone().add(side.clone().multiplyScalar(4)).sub(dir.clone().multiplyScalar(3)).setY(4.5),
+        b.clone().sub(dir.clone().multiplyScalar(1.2)).setY(2.6),
+        b.clone().setY(0.6),
+      ];
+      const cCurve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4);
+      world.coaster = { curve: cCurve, from: 22, to: 27 };
+
+      /* レール */
+      const rail = new THREE.Mesh(
+        new THREE.TubeGeometry(cCurve, 90, 0.14, 6, false),
+        lambert(0xff6b6b)
+      );
+      scene.add(rail);
+      /* まくらぎ と はしら */
+      const N2 = 26;
+      for (let k = 0; k <= N2; k++) {
+        const u = k / N2;
+        const p = cCurve.getPointAt(u);
+        const tn = cCurve.getTangentAt(u);
+        const sd = tn.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+        const tie = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.22), lambert(0xffffff));
+        tie.position.copy(p).addScaledVector(sd, 0);
+        tie.position.y -= 0.12;
+        tie.lookAt(p.clone().add(tn));
+        scene.add(tie);
+        if (k % 4 === 0 && p.y > 1.4) {
+          const pil = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, p.y, 8), lambert(0xf1f3f5));
+          pil.position.set(p.x, p.y / 2 - 0.1, p.z);
+          scene.add(pil);
+        }
+      }
+    })();
+
+    /* ---------- ひみつの どうくつ（おおあなマスの ずっと した） ---------- */
+    (function buildCave() {
+      const holeTile = world.tiles[11];
+      const CY = -30;                     /* どうくつの ゆかの たかさ */
+      const base = new THREE.Vector3(holeTile.pos.x, CY, holeTile.pos.z);
+      const cave = new THREE.Group();
+      scene.add(cave);
+
+      /* いわの ドーム（うちがわ）：ちじょうには ぜったい でない ふかさ */
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(20, 24, 18),
+        new THREE.MeshLambertMaterial({ color: 0x4e3d33, side: THREE.BackSide })
+      );
+      dome.scale.y = 0.7;
+      dome.position.set(base.x, CY + 6, base.z);
+      cave.add(dome);
+      /* ゆか */
+      const floor = new THREE.Mesh(
+        new THREE.CircleGeometry(18, 28),
+        new THREE.MeshLambertMaterial({ color: 0x5d4a3c })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set(base.x, CY, base.z);
+      cave.add(floor);
+
+      /* ひかる キノコ と すいしょう */
+      const glowCols = [0x69f0ae, 0x40c4ff, 0xea80fc, 0xffd740];
+      for (let k = 0; k < 14; k++) {
+        const col = glowCols[k % glowCols.length];
+        const a = U.rand(0, Math.PI * 2), r = U.rand(6, 14);
+        if (k % 2) {
+          const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.8, 8),
+            new THREE.MeshLambertMaterial({ color: 0xd7ccc8 }));
+          stem.position.y = 0.4;
+          const cap = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+            new THREE.MeshLambertMaterial({ color: col, emissive: col, emissiveIntensity: 0.7 }));
+          cap.position.y = 0.8;
+          const mg = new THREE.Group();
+          mg.add(stem, cap);
+          mg.position.set(base.x + Math.cos(a) * r, CY, base.z + Math.sin(a) * r);
+          mg.scale.setScalar(U.rand(0.8, 1.6));
+          cave.add(mg);
+        } else {
+          const cr = new THREE.Mesh(new THREE.OctahedronGeometry(U.rand(0.5, 1.1)),
+            new THREE.MeshLambertMaterial({ color: col, emissive: col, emissiveIntensity: 0.55, transparent: true, opacity: 0.9 }));
+          cr.position.set(base.x + Math.cos(a) * r, CY + 0.7, base.z + Math.sin(a) * r);
+          cr.scale.y = 1.7;
+          cr.rotation.y = U.rand(0, 3);
+          cave.add(cr);
+        }
+      }
+
+      /* とびいし 3まい と たからばこ */
+      const stones = [];
+      for (let k = 0; k < 3; k++) {
+        const sp = new THREE.Vector3(base.x - 4.5 + k * 3.2, CY + 0.25, base.z + (k % 2 ? 1.4 : -1.4));
+        const st = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.3, 0.5, 14),
+          new THREE.MeshLambertMaterial({ color: 0x8d6e63 }));
+        st.position.copy(sp);
+        cave.add(st);
+        stones.push(new THREE.Vector3(sp.x, CY + 0.5, sp.z));
+      }
+      const chestPos = new THREE.Vector3(base.x + 5.6, CY, base.z);
+      const chest = new THREE.Group();
+      const cbody = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 1.1), lambert(0x8d5524));
+      cbody.position.y = 0.45;
+      const clid = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.56, 1.6, 12, 1, false, 0, Math.PI),
+        lambert(0xa1662f));
+      clid.rotation.z = Math.PI / 2;
+      clid.position.y = 0.9;
+      const gold = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 8),
+        new THREE.MeshLambertMaterial({ color: 0xffd43b, emissive: 0xffb300, emissiveIntensity: 0.5 }));
+      gold.position.y = 0.75;
+      gold.scale.y = 0.5;
+      gold.visible = false;
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.95, 1.14), lambert(0xffd43b));
+      band.position.y = 0.45;
+      chest.add(cbody, clid, gold, band);
+      chest.position.copy(chestPos);
+      cave.add(chest);
+
+      /* どうくつの なかの ひかり */
+      const caveLight = new THREE.PointLight(0xffe0b2, 1.0, 45);
+      caveLight.position.set(base.x, CY + 8, base.z);
+      cave.add(caveLight);
+
+      world.cave = {
+        base, stones, chestPos,
+        chest, chestLid: clid, chestGold: gold,
+        entry: new THREE.Vector3(base.x - 7.5, CY + 0.5, base.z),
+        holeIndex: 11, exitIndex: 13,
+      };
+    })();
+
+    /* ---------- おうちの よてい ち（ゴールの よこ） ---------- */
+    const sideG = dirG.clone().cross(new THREE.Vector3(0, 1, 0)).normalize();
+    world.houseSpots = [
+      cas.position.clone().addScaledVector(sideG, 9).setY(0),
+      cas.position.clone().addScaledVector(sideG, -9).setY(0),
+    ];
+    world.houses = [null, null];
+    world.addHouse = (slot, tier, color) => {
+      slot = slot % world.houseSpots.length;
+      if (world.houses[slot]) scene.remove(world.houses[slot]);
+      const h = new THREE.Group();
+      if (tier === 1) {
+        /* かわいい おうち */
+        const wallsH = new THREE.Mesh(new THREE.BoxGeometry(3, 2.2, 2.6), lambert(0xfff3e0));
+        wallsH.position.y = 1.1;
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.8, 4), lambert(color || 0xff6b6b));
+        roof.position.y = 3.1;
+        roof.rotation.y = Math.PI / 4;
+        const door = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.2, 0.1), lambert(0x8d5524));
+        door.position.set(0, 0.6, 1.32);
+        const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.1), lambert(0xbfeaff));
+        win.position.set(0.85, 1.5, 1.32);
+        h.add(wallsH, roof, door, win);
+      } else {
+        /* ごうてい！ */
+        const main = new THREE.Mesh(new THREE.BoxGeometry(4.6, 3.2, 3), lambert(0xfffde7));
+        main.position.y = 1.6;
+        h.add(main);
+        for (const sx of [-2.6, 2.6]) {
+          const tw = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.95, 4.2, 12), lambert(0xfffde7));
+          tw.position.set(sx, 2.1, 0);
+          h.add(tw);
+          const tr = new THREE.Mesh(new THREE.ConeGeometry(1.15, 1.6, 12), lambert(color || 0x74c0fc));
+          tr.position.set(sx, 5.0, 0);
+          h.add(tr);
+        }
+        const roof2 = new THREE.Mesh(new THREE.ConeGeometry(3.2, 2.0, 4), lambert(color || 0x74c0fc));
+        roof2.position.y = 4.2;
+        roof2.rotation.y = Math.PI / 4;
+        const door2 = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.6, 0.1), lambert(0x8d5524));
+        door2.position.set(0, 0.8, 1.52);
+        const gold2 = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 8, 16), lambert(0xffd43b));
+        gold2.position.set(0, 2.6, 1.52);
+        h.add(roof2, door2, gold2);
+      }
+      h.add(blobShadow(tier === 1 ? 2.2 : 3.4));
+      const spot = world.houseSpots[slot];
+      h.position.copy(spot);
+      h.lookAt(cas.position.x, 0, cas.position.z);
+      scene.add(h);
+      world.houses[slot] = h;
+      return h;
+    };
 
     /* ---------- くにごとの かざり ---------- */
     const decoParent = new THREE.Group();
@@ -679,7 +938,19 @@ const World = (() => {
       cas.traverse(o => { if (o.userData.flag) o.rotation.y = Math.sin(t * 4) * 0.45; });
     });
 
-    world.update = (t, dt) => { for (const fn of world.anims) fn(t, dt); };
+    /* カメラの めのまえの かざりは そっと かくす（がめんを ふさがない ように） */
+    world.camPos = new THREE.Vector3(999, 0, 999);
+    world.anims.push(() => {
+      for (const child of decoParent.children) {
+        const d = Math.hypot(child.position.x - world.camPos.x, child.position.z - world.camPos.z);
+        child.visible = d > 6.5;
+      }
+    });
+
+    world.update = (t, dt, camPos) => {
+      if (camPos) world.camPos.copy(camPos);
+      for (const fn of world.anims) fn(t, dt);
+    };
     return world;
   }
 
