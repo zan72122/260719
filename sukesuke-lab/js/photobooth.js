@@ -185,6 +185,13 @@ window.GAMES.photobooth = (() => {
     };
     /* すわっている間はイス回しが優先 (人形は頭のあたりでつかめる) */
     if (!dollOn && near(doll.g, 120, 80)) { grabDoll(); return; }
+    if (near(btnG, 70)) {
+      if (countdown === 0 && !printing && flashT === 0) {
+        countdown = 3.6;
+        S.clickReal(0.9);
+      }
+      return;
+    }
     if (near(stool, 170, 240)) {
       /* イスを回す (画面上の円ドラッグ) */
       dragMode = 'stool';
@@ -199,13 +206,6 @@ window.GAMES.photobooth = (() => {
       return;
     }
     if (dollOn && near(doll.g, 120, 80)) { grabDoll(); return; }
-    if (near(btnG, 70)) {
-      if (countdown === 0 && !printing && flashT === 0) {
-        countdown = 3.6;
-        S.clickReal(0.9);
-      }
-      return;
-    }
     if (orbitId === null) {
       orbitId = e.pointerId;
       orbitFrom = { x: e.clientX, y: e.clientY, az: stage3.orbit.az, po: stage3.orbit.po };
