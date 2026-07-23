@@ -177,13 +177,14 @@ window.GAMES.photobooth = (() => {
       v.y += dy || 0;
       return ray.ray.distanceToPoint(v) < rad;
     };
-    if (near(doll.g, 120, 80)) {
+    const grabDoll = () => {
       dragMode = 'doll';
       dragId = e.pointerId;
       dollOn = false;
       S.plip(1.3);
-      return;
-    }
+    };
+    /* すわっている間はイス回しが優先 (人形は頭のあたりでつかめる) */
+    if (!dollOn && near(doll.g, 120, 80)) { grabDoll(); return; }
     if (near(stool, 170, 240)) {
       /* イスを回す (画面上の円ドラッグ) */
       dragMode = 'stool';
@@ -197,6 +198,7 @@ window.GAMES.photobooth = (() => {
       dragA0 = Math.atan2(e.clientY - stool.userData.cy, e.clientX - stool.userData.cx);
       return;
     }
+    if (dollOn && near(doll.g, 120, 80)) { grabDoll(); return; }
     if (near(btnG, 70)) {
       if (countdown === 0 && !printing && flashT === 0) {
         countdown = 3.6;
