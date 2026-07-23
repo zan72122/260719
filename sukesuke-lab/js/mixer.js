@@ -277,7 +277,7 @@ window.GAMES.mixer = (() => {
 
     /* 回転 (ボタンをおしている間・フタと果物が必要) */
     const canSpin = pressing && lidOn && (inJar.length > 0 || liquid > 0.05);
-    spinV += ((canSpin ? 26 : 0) - spinV) * Math.min(1, dt * (canSpin ? 6 : 3));
+    spinV += ((canSpin ? 26 : 0) - spinV) * Math.min(1, dt * (canSpin ? 6 : 10));
     blades.rotation.y += spinV * dt;
     motor.rotation.y += spinV * dt;
     if (whirr) whirr.set(U.clamp(spinV / 26, 0, 1) * 0.75);
