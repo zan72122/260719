@@ -242,14 +242,9 @@ window.GAMES.washer = (() => {
         if (t > 0) {
           bottleG.position.set(o.x + d.x * t, 620 - 80, Math.max(180, o.z + d.z * t));
           /* 引き出しの上でかたむけて注ぐ */
-          const over = Math.hypot(bottleG.position.x + 170, bottleG.position.z - 230) < 130;
+          const over = Math.hypot(bottleG.position.x + 170, bottleG.position.z - 230) < 150;
           bottleG.rotation.z = over ? 1.2 : 0;
-          if (over && phase !== 'wash') {
-            detergent = Math.min(1.2, detergent + 0.007);
-            gaugeFill.scale.x = Math.min(1, detergent);
-            if (Math.random() < 0.12) S.drip();
-            if (detergent > 1 && Math.random() < 0.1) S.buzz();
-          }
+          pouring = over;
         }
       } else {
         const t = (330 - o.y) / d.y;
@@ -279,6 +274,7 @@ window.GAMES.washer = (() => {
       if (dragObj === 'bottle') {
         bottleG.position.copy(bottleG.userData.home);
         bottleG.rotation.z = 0;
+        pouring = false;
       }
       dragObj = null;
       dragId = null;
@@ -294,6 +290,14 @@ window.GAMES.washer = (() => {
     prev = now;
     time += dt;
     phaseT += dt;
+
+    /* 洗剤そそぎ (かたむけているあいだ時間で増える) */
+    if (pouring && dragObj === 'bottle' && phase !== 'wash') {
+      detergent = Math.min(1.2, detergent + dt * 0.28);
+      gaugeFill.scale.x = Math.min(1, detergent);
+      if (Math.random() < dt * 6) S.drip();
+      if (detergent > 1 && Math.random() < dt * 4) S.buzz();
+    }
 
     const locked = phase !== 'idle' && phase !== 'done';
     lockLamp.material.color.set(locked ? 0xd83030 : 0x3a4038);
@@ -395,7 +399,7 @@ window.GAMES.washer = (() => {
   return {
     start(el) {
       time = 0;
-      phase = 'idle'; phaseT = 0; drumA = 0; drumSpeed = 0;
+      phase = 'idle'; phaseT = 0; drumA = 0; drumSpeed = 0; pouring = false;
       waterLv = 0; detergent = 0; dirtInWater = 0;
       dragObj = null; dragId = null; orbitId = null; orbitFrom = null;
 
