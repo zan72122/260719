@@ -70,6 +70,72 @@ const S = (() => {
       blip('sine', 660, 660, 0.3, 0.12, 0.15);
     },
 
+    /* バーコードのピッ */
+    beepScan() {
+      blip('square', 2550, 2550, 0.09, 0.16);
+    },
+
+    /* レシートの印字送り (短いジジジ) */
+    printFeed(dur) {
+      const n = Math.max(3, Math.floor((dur || 0.3) / 0.045));
+      for (let i = 0; i < n; i++) hiss(0.03, 0.1, 3600, i * 0.045);
+    },
+
+    /* 自動ドアの入店チャイム */
+    doorChime() {
+      blip('sine', 659, 659, 0.16, 0.13);
+      blip('sine', 880, 880, 0.34, 0.12, 0.17);
+    },
+
+    /* ポップコーンの1粒ポン (k で音程ゆらぎ) */
+    pop(k) {
+      const f = 300 + (k || 0) * 180;
+      blip('sine', f, f * 0.4, 0.07, 0.3);
+      hiss(0.05, 0.12, 2000 + (k || 0) * 800, 0.005);
+    },
+
+    /* オルゴールの短い音 (きらきら星をゲーム側で並べる) */
+    boxNote(f, vol) {
+      blip('sine', f, f, 0.5, (vol || 0.12));
+      blip('sine', f * 2, f * 2, 0.25, (vol || 0.12) * 0.3);
+    },
+
+    /* 水のちゃぷちゃぷループ。set(0〜1)、stop() */
+    sloshLoop() {
+      const c = ac();
+      if (!c) return { set() {}, stop() {} };
+      const src = c.createBufferSource();
+      src.buffer = noise(c);
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = 500;
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 1.1;
+      const lfoG = c.createGain();
+      lfoG.gain.value = 300;
+      lfo.connect(lfoG).connect(f.frequency);
+      lfo.start();
+      const g = c.createGain();
+      g.gain.value = 0;
+      src.connect(f).connect(g).connect(c.destination);
+      src.start();
+      let stopped = false;
+      return {
+        set(level) {
+          if (stopped) return;
+          g.gain.setTargetAtTime(level * 0.14, c.currentTime, 0.2);
+          lfo.frequency.setTargetAtTime(0.7 + level * 2.2, c.currentTime, 0.3);
+        },
+        stop() {
+          if (stopped) return;
+          stopped = true;
+          g.gain.setTargetAtTime(0, c.currentTime, 0.1);
+          setTimeout(() => { try { src.stop(); lfo.stop(); } catch (e) {} }, 600);
+        },
+      };
+    },
+
     /* カチッ */
     kachi() {
       blip('square', 2200, 1400, 0.035, 0.22);
