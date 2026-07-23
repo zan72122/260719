@@ -184,6 +184,11 @@ window.GAMES.gasstand = (() => {
     if (near(nozzleG, 110)) {
       dragMode = 'nozzle';
       dragId = e.pointerId;
+      if (nozzleAt === 'car') {
+        nozzleAt = 'held';
+        squeezing = false;
+        nozzleG.rotation.z = 0;
+      }
       S.clickReal(0.5);
       return;
     }

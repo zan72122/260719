@@ -224,7 +224,7 @@ window.GAMES.garbagetruck = (() => {
         const t = (cycle - 1.6) / 1;
         pushPlate.position.x = 30 - Math.sin(t * Math.PI) * 90;
         if (t > 0.45 && hopperBags.length) {
-          fill = Math.min(MAX_FILL, fill + hopperBags.length * 0.9);
+          fill = Math.min(MAX_FILL, fill + hopperBags.length * 1.2);
           hopperBags = [];
           S.thunk();
         }

@@ -187,7 +187,7 @@ window.GAMES.atm = (() => {
     }
     if (state === 'pin') {
       for (const b of padBtns) {
-        if (near(b, 60)) {
+        if (near(b, 90)) {
           pin++;
           S.beepScan();
           drawScreen();
@@ -201,7 +201,7 @@ window.GAMES.atm = (() => {
     }
     if (state === 'amount') {
       for (const b of amtBtns) {
-        if (near(b, 80)) {
+        if (near(b, 100)) {
           const n = b.userData.n;
           if (cassetteN >= n) {
             countTarget = n;
