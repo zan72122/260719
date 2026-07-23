@@ -220,7 +220,8 @@ window.GAMES.busdoor = (() => {
         /* ICリーダーにかざした？ */
         const iv = new THREE.Vector3();
         icReader.getWorldPosition(iv);
-        if (!dragDoll.tapped && dragDoll.g.position.distanceTo(iv) < 110 && doorOpen > 0.5) {
+        const icDist = Math.hypot(dragDoll.g.position.x - iv.x, dragDoll.g.position.z - iv.z);
+        if (!dragDoll.tapped && icDist < 130 && doorOpen > 0.5) {
           dragDoll.tapped = true;
           icLamp.material.color.set(0x50e070);
           S.beepScan();
@@ -321,7 +322,7 @@ window.GAMES.busdoor = (() => {
     });
 
     /* とびら: 停車中だけあく (エアシリンダー) */
-    const doorTarget = (atStop && busSpeed < 0.08) ? 1 : 0;
+    const doorTarget = (atStop && busSpeed < 0.08 && nextStopT > 0) ? 1 : 0;
     const before = doorOpen;
     doorOpen += (doorTarget - doorOpen) * Math.min(1, dt * 3);
     if (before < 0.1 && doorOpen >= 0.1) S.flap();

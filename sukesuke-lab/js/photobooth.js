@@ -184,7 +184,7 @@ window.GAMES.photobooth = (() => {
       S.plip(1.3);
       return;
     }
-    if (near(stool, 130, 200)) {
+    if (near(stool, 170, 240)) {
       /* イスを回す (画面上の円ドラッグ) */
       dragMode = 'stool';
       dragId = e.pointerId;

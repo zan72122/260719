@@ -162,13 +162,13 @@ window.GAMES.fridge = (() => {
         return;
       }
     }
-    if (near(doorTop, 160, 0, 420)) {
+    if (near(doorTop, 220, 0, 420)) {
       dragObj = 'doorTop';
       dragId = e.pointerId;
       doorTop.userData.d = { x0: e.clientX, v0: doorTopA };
       return;
     }
-    if (near(doorBot, 220, 0, 420)) {
+    if (near(doorBot, 280, 0, 420)) {
       dragObj = 'doorBot';
       dragId = e.pointerId;
       doorBot.userData.d = { x0: e.clientX, v0: doorBotA };
