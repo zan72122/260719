@@ -37,6 +37,7 @@ html, body {
   overflow-y: auto;
   overflow-x: hidden;
   touch-action: pan-y;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   padding: max(3vmin, env(safe-area-inset-top)) 0 8vmin;
 }

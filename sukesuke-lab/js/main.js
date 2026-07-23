@@ -12,7 +12,10 @@
   /* ダブルタップ拡大などをふせぐ */
   document.addEventListener('gesturestart', e => e.preventDefault());
   document.addEventListener('dblclick', e => e.preventDefault());
-  document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  /* ゲーム中の画面バウンスはふせぐが、ホームの指スクロールだけは通す */
+  document.addEventListener('touchmove', e => {
+    if (!(e.target instanceof Element) || !e.target.closest('#home')) e.preventDefault();
+  }, { passive: false });
   document.addEventListener('contextmenu', e => e.preventDefault());
 
   document.querySelectorAll('.card').forEach(btn => {
