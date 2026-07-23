@@ -222,10 +222,12 @@ window.GAMES.mixer = (() => {
         const p = new THREE.Vector3(o.x + d.x * t, 430, o.z + d.z * t);
         if (dragObj === 'jar') {
           jarG.position.set(p.x, Math.max(280, p.y - 100), p.z);
+          /* コップの上にいるかはポインタのレイで判定 (視差の影響なし) */
           const gv = new THREE.Vector3();
           glasses[glasses.length - 1].getWorldPosition(gv);
-          const q = groundPoint(jarG.position, gv.y + 90);
-          jarG.rotation.z = Math.hypot(q.x - gv.x, q.z - gv.z) < 220 ? 1.5 : 0;
+          gv.y += 90;
+          jarG.userData.nearGlass = ray.ray.distanceToPoint(gv) < 200;
+          jarG.rotation.z = jarG.userData.nearGlass ? 1.5 : 0;
         } else {
           dragObj.g.position.copy(p);
         }
@@ -319,10 +321,7 @@ window.GAMES.mixer = (() => {
     /* 注ぐ */
     if (dragObj === 'jar' && jarG.rotation.z > 1 && liquid > 0.02) {
       const glass = glasses[glasses.length - 1];
-      const gv = new THREE.Vector3();
-      glass.getWorldPosition(gv);
-      const q = groundPoint(jarG.position, gv.y + 90);
-      if (Math.hypot(q.x - gv.x, q.z - gv.z) < 220) {
+      if (jarG.userData.nearGlass) {
         liquid = Math.max(0, liquid - dt * 0.4);
         glass.userData.fill = Math.min(1, glass.userData.fill + dt * 0.5);
         glass.userData.juice.material.color.copy(juiceCol);
