@@ -459,7 +459,7 @@ window.GAMES.hanabi = (() => {
       GUIDE.start(stage3, [
         {
           kind: 'drag', at: () => trayHits[0], to: () => new THREE.Vector3(390, 280, 300),
-          when: () => phase === 'pack', done: () => packed.length > 0,
+          when: () => phase === 'pack', done: () => packed.length > 2,
         },
         {
           kind: 'tap', at: () => lidHit,
