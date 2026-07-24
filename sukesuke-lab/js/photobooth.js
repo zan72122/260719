@@ -344,7 +344,14 @@ window.GAMES.photobooth = (() => {
       /* 4歳向けガイド: 人形をイスへ → イスを回して枠に合わせる → ボタン */
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => doll.g, to: () => stool,
+          /* 人形は y=200 平面上を動き、座らせた判定はスツールとのXZ距離。
+             to はスツール原点 (床) ではなく平面上の真上を指す */
+          kind: 'drag', at: () => doll.g, to: () => {
+            const v = new THREE.Vector3();
+            stool.getWorldPosition(v);
+            v.y = 200;
+            return v;
+          },
           when: () => !dollOn, done: () => dollOn,
         },
         {
