@@ -592,9 +592,11 @@ window.GAMES.camera = (() => {
             if (right.lengthSq() > 0.01) right.normalize();
             return v.addScaledVector(right, 300);
           },
-          when: () => !rewinding && count < MAXSHOT, done: () => cocked || count > 0,
+          /* 巻き戻しは MAXSHOT 枚撮り切ってから: 撮影で cocked が戻ると
+             このステップは「後戻り」となり、ガイドが自然に巻き上げ→撮影を繰り返す */
+          when: () => !rewinding && count < MAXSHOT, done: () => cocked || count >= MAXSHOT,
         },
-        { kind: 'tap', at: () => shutterBtn, when: () => cocked, done: () => count > 0 },
+        { kind: 'tap', at: () => shutterBtn, when: () => cocked, done: () => !cocked || count >= MAXSHOT },
         { kind: 'turn', at: () => crankG, turnDir: 1, when: () => count >= MAXSHOT, done: () => printCount > 0 },
       ]);
 

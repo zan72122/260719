@@ -346,9 +346,16 @@ window.GAMES.fridge = (() => {
         {
           /* ドアはスクリーン左方向へのドラッグ量で開く。ワールド固定点だと
              カメラの向きしだいで逆方向に投影されるので、カメラの左ベクトルで示す */
-          kind: 'drag', at: () => window.__pts.doorBot, to: () => {
+          kind: 'drag', at: () => {
+            /* つかみ判定の中心はドア原点 (ちょうつがい) から +420x のハンドル側 */
             const v = new THREE.Vector3();
             doorBot.getWorldPosition(v);
+            v.x += 420;
+            return v;
+          }, to: () => {
+            const v = new THREE.Vector3();
+            doorBot.getWorldPosition(v);
+            v.x += 420;
             v.y = 490;
             const left = new THREE.Vector3(-1, 0, 0).applyQuaternion(stage3.camera.quaternion);
             left.y = 0;
@@ -365,9 +372,15 @@ window.GAMES.fridge = (() => {
           done: () => (gdIn = gdIn || foods.some(f => f.inside)),
         },
         {
-          kind: 'drag', at: () => window.__pts.doorBot, to: () => {
+          kind: 'drag', at: () => {
             const v = new THREE.Vector3();
             doorBot.getWorldPosition(v);
+            v.x += 420;
+            return v;
+          }, to: () => {
+            const v = new THREE.Vector3();
+            doorBot.getWorldPosition(v);
+            v.x += 420;
             v.y = 490;
             const right = new THREE.Vector3(1, 0, 0).applyQuaternion(stage3.camera.quaternion);
             right.y = 0;
