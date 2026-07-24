@@ -472,8 +472,8 @@ window.GAMES.rocket = (() => {
         return v;
       };
       GUIDE.start(stage3, [
-        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV > 0.5 },
-        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV > 0.5 },
+        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV.p > 0.5 },
+        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV.p > 0.5 },
         { kind: 'tap', at: () => ignBtn, when: () => phase === 'idle', done: () => phase !== 'idle' },
         { kind: 'tap', at: () => rocketHit, when: () => phase === 'fly' && !sep && alt > 600, done: () => sep },
       ]);
