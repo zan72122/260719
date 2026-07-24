@@ -289,14 +289,20 @@ window.AUTOPLAY = (() => {
       const c = toScreen(p);
       if (!c) { finishGesture(); return; }
       g.cx = c.x; g.cy = c.y;
-      g.radius = 0;             /* 中心で確実につかんでから、らせん状に外へ */
+      g.radius = 12;            /* ほぼ中心でつかんでから、らせん状に外へ */
       g.angle = -Math.PI / 2;
       g.dir = st.turnDir || 1;
       g.accum = 0;
       g.flipped = false;
-      /* ノブの中心で pointerdown する: 半径90pxの円周上から始めると、
-         小さなつまみ (バルブ・クランク等) では当たり判定を外れてしまう */
-      fire('pointerdown', g.cx, g.cy);
+      /* ノブのほぼ中心で pointerdown する: 半径90pxの円周上から始めると
+         小さなつまみ (バルブ・クランク等) では当たり判定を外れる。
+         ただし中心ぴったりだと、指の角度 (atan2) が開始角度と食いちがい、
+         最初の移動で角度差が±90°飛んでダイヤルが大きくジャンプしてしまう
+         (きんこ は揃えた円盤がこの一撃で弾かれて永遠に開かなかった)。
+         開始角度の方向へ少しだけずらした点なら、角度が最初から一致する */
+      fire('pointerdown',
+        g.cx + Math.cos(g.angle) * g.radius,
+        g.cy + Math.sin(g.angle) * g.radius);
       g.sub = 'turning'; g.t0 = now;
       return;
     }

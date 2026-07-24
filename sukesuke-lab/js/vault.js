@@ -459,13 +459,16 @@ window.GAMES.vault = (() => {
         { kind: 'turn', at: () => dialMesh, turnDir: 1, done: () => alignedDisc(0) || boltT > 0.1 },
         { kind: 'turn', at: () => handleG, turnDir: 1, when: () => fenceDropped, done: () => boltT > 0.95 },
         {
+          /* 扉はスクリーン左方向へのドラッグ量であく。ワールド固定点だと
+             カメラの向きしだいで逆に投影されるので、カメラの左ベクトルで示す */
           kind: 'drag', at: () => window.__pts.doorEdge,
           to: () => {
             const v = new THREE.Vector3();
             window.__pts.doorEdge.getWorldPosition(v);
-            v.x -= 350;
-            v.z += 200;
-            return v;
+            const left = new THREE.Vector3(-1, 0, 0).applyQuaternion(stage3.camera.quaternion);
+            left.y = 0;
+            if (left.lengthSq() > 0.01) left.normalize();
+            return v.addScaledVector(left, 400);
           },
           when: () => boltT > 0.9, done: () => doorA.t > 0.8,
         },
