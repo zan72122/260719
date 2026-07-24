@@ -14,6 +14,7 @@ window.AUTOPLAY = (() => {
   const SYN_ID = 999001;
   const RUN_TIMEOUT = 180000;   /* 全体の安全打ち切り (複数タンブラーの連鎖ピック手順や、ゆっくり収束する物理は長くなりうる) */
   const TAP_HOLD_MS = 120;
+  const TAP_HOLD_TICKS = 4;     /* 押し下げをゲームに何フレームぶん見せるか */
   const TAP_SETTLE_TIMEOUT = 15000;  /* バネで確定するラッチ機構 (ぺんのノック等) が落ち着くのを待つ。早すぎる再タップは進行中のラッチ動作を邪魔しうるので、ここは長めに待ってから再試行する */
   const MAX_TAP_ATTEMPTS = 2;
   const HOLD_TIMEOUT = 20000;
@@ -25,7 +26,6 @@ window.AUTOPLAY = (() => {
   const DRAG_SETTLE_MS = 4000;  /* 目標で離したあと「置く」動作が確定するのを待つ時間 */
   const TURN_STEP_RAD = 0.06;   /* 金庫のタンブラー等、狭い一致窓を飛び越えないよう小刻みに */
   const TURN_ARC_BUDGET = Math.PI * 2 * 4;    /* 1方向あたりの試行角度 (円盤を1枚ずつ拾う遊びの合計を上回る余裕) */
-  const TURN_TIMEOUT = 30000;   /* 1方向あたりの安全打ち切り (ソフトウェアレンダリング環境でも十分な余裕) */
 
   const MAX_STEP_CYCLES = 5;    /* 同じステップに何度もジェスチャーをやり直しても進まない場合の見切り上限 */
 
@@ -153,11 +153,15 @@ window.AUTOPLAY = (() => {
       const s = toScreen(p);
       if (!s) { finishGesture(); return; }
       fire('pointerdown', s.x, s.y);
-      g.sub = 'down'; g.t0 = now;
+      g.sub = 'down'; g.t0 = now; g.downTicks = 0;
       return;
     }
     if (g.sub === 'down') {
-      if (elapsed >= TAP_HOLD_MS) {
+      /* 壁時計だけでなく描画フレーム数でも待つ: バネ式のボタンは押し込みが
+         数フレームぶん進んでから離さないと反応しない (低フレームレート環境では
+         120ms がゲームの1フレーム未満になりうる) */
+      g.downTicks++;
+      if (elapsed >= TAP_HOLD_MS && g.downTicks >= TAP_HOLD_TICKS) {
         fire('pointerup', lastX, lastY);
         g.sub = 'settle'; g.t0 = now;
       }
@@ -297,8 +301,8 @@ window.AUTOPLAY = (() => {
     if (g.sub === 'turning') {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
-      if (done || now - g.t0 > TURN_TIMEOUT) {
-        if (done) latchCur();
+      if (done) {
+        latchCur();
         fire('pointerup', lastX, lastY);
         finishGesture();
         return;
