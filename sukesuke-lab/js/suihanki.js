@@ -479,7 +479,8 @@ window.GAMES.suihanki = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
-      /* ガイド: お米 → 水 → フタ → ボタン → (炊けたら)フタ → しゃもじ */
+      /* ガイド: お米 → 水 → フタ → ボタン → (炊けたら)フタ → しゃもじですくう → お茶碗へ */
+      let gdScooped = false;
       GUIDE.start(stage3, [
         {
           kind: 'drag', at: () => cup, to: () => new THREE.Vector3(POT_X, 420, POT_Z),
@@ -507,8 +508,22 @@ window.GAMES.suihanki = (() => {
           done: () => lidA > 0.6,
         },
         {
+          /* まず釜の上ですくう (scooped はよそうと消費されるので自己ラッチ) */
           kind: 'drag', at: () => shamoji, to: () => new THREE.Vector3(POT_X, 420, POT_Z),
           when: () => keepWarm && lidA > 0.6,
+          done: () => (gdScooped = gdScooped || scooped),
+        },
+        {
+          /* すくったごはんをお茶碗の上ではなす (判定はお茶碗のふち高さへの
+             視覚的な重なりなので、to もふち高さの点を指す) */
+          kind: 'drag', at: () => shamoji,
+          to: () => {
+            const v = new THREE.Vector3();
+            bowls[bowls.length - 1].getWorldPosition(v);
+            v.y += 60;
+            return v;
+          },
+          when: () => keepWarm && lidA > 0.6 && scooped,
           done: () => bowls.some(b => b.userData.rice.visible),
         },
       ]);

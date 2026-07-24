@@ -213,26 +213,6 @@ window.AUTOPLAY = (() => {
     }
   }
 
-  /* 視差補正サーボ: ドラッグ対象 (at が動くオブジェクトの場合) の実位置と to の
-     XZ誤差を観測し、スクリーン上の押し先を少しずつ補正する。ゲームごとに
-     「ポインターをどの高さの平面に写すか」が違うため、to の投影に合わせるだけ
-     では平面差のぶん着地がずれる (視差)。誤差が縮まらなくなったら凍結する。 */
-  function servoAdjust(a, b) {
-    if (g.servoFrozen || !g.startAt || !a || !b) return;
-    if (a.distanceTo(g.startAt) < 20) return;   /* at が静止物 (対象がつままれていない) なら何もしない */
-    _lerp.set(b.x - a.x, 0, b.z - a.z);
-    const err = _lerp.length();
-    if (err < 25) return;
-    if (err >= g.servoErr - 2) { g.servoFrozen = true; return; }  /* 進歩なし → 届かない軸の誤差 */
-    g.servoErr = err;
-    const p1 = toScreen(a);
-    const p1x = p1 && p1.x, p1y = p1 && p1.y;
-    const p2 = toScreen(_lerp.add(a));
-    if (!p1 || !p2) return;
-    g.servoX = U.clamp(g.servoX + (p2.x - p1x) * 0.8, -400, 400);
-    g.servoY = U.clamp(g.servoY + (p2.y - p1y) * 0.8, -400, 400);
-  }
-
   function driveDrag(now) {
     const st = g.step;
     const elapsed = now - g.t0;
@@ -240,8 +220,6 @@ window.AUTOPLAY = (() => {
       const p = posOf(st.at, _a);
       const s = toScreen(p);
       if (!s) { finishGesture(); return; }
-      g.startAt = p.clone();
-      g.servoX = 0; g.servoY = 0; g.servoErr = Infinity; g.servoFrozen = false;
       fire('pointerdown', s.x, s.y);
       g.sub = 'move'; g.t0 = now;
       return;
@@ -271,22 +249,18 @@ window.AUTOPLAY = (() => {
       }
       if (elapsed >= Math.min(DRAG_DWELL_MAX_MS, DRAG_DWELL_MS * stepCycles)) {
         /* 目標地点でそっと離す (「はなした瞬間に置く」が成立する系のため、
-           必ず to の真上 (サーボ補正込み) へ戻ってから離す) */
+           必ず to の真上へ戻ってから離す) */
         const b = posOf(st.to, _b);
         const s = b && toScreen(b);
-        if (s) fire('pointermove', s.x + g.servoX, s.y + g.servoY);
+        if (s) fire('pointermove', s.x, s.y);
         fire('pointerup', lastX, lastY);
         g.sub = 'settle'; g.t0 = now;
         return;
       }
       if (now - g.lastPing > 150) {
-        const a = posOf(st.at, _a);
         const b = posOf(st.to, _b);
-        if (b) {
-          servoAdjust(a, b);
-          const s = toScreen(b);
-          if (s) fire('pointermove', s.x + g.servoX, s.y + g.servoY);
-        }
+        const s = b && toScreen(b);
+        if (s) fire('pointermove', s.x, s.y);
         g.lastPing = now;
       }
       return;

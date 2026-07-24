@@ -522,7 +522,8 @@ window.GAMES.coffeemaker = (() => {
           done: () => powderN >= 0.1,
         },
         {
-          kind: 'drag', at: () => window.__pitcher, to: () => new THREE.Vector3(MAK_X - 160, 500, MAK_Z),
+          /* そそぐ判定はタンク口の高さ (640) への視点再投影なので、to も同じ高さを指す */
+          kind: 'drag', at: () => window.__pitcher, to: () => new THREE.Vector3(MAK_X - 160, 640, MAK_Z),
           when: () => powderN >= 0.1 && waterN < 0.4 && !brewing,
           done: () => waterN >= 0.4,
         },

@@ -466,7 +466,9 @@ window.GAMES.dishwasher = (() => {
       /* ガイド: お皿 → 洗剤 → とびら → スタート → (おわったら)とびら */
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => window.__pts.dish0, to: () => new THREE.Vector3(BOX_X - 150, 500, BOX_Z),
+          /* 入った判定は皿の位置をラック高さ (360) へ視点再投影して行うため、
+             to も同じ高さのスロット位置を指す (高い点だと視差で外れる) */
+          kind: 'drag', at: () => window.__pts.dish0, to: () => new THREE.Vector3(BOX_X - 150, 360, BOX_Z),
           when: () => phase === 'idle' && doorA > 0.5 && dishes.every(d => d.slot < 0),
           done: () => dishes.some(d => d.slot >= 0),
         },
