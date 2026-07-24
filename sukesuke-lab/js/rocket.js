@@ -209,9 +209,19 @@ window.GAMES.rocket = (() => {
 
   function onDown(e) {
     const ray = stage3.setRay(e);
-    for (const L of leverHits) {
-      if (dragLever === null && ray.intersectObject(L.hit, false).length) {
-        dragLever = { idx: L.idx, id: e.pointerId, y0: e.clientY, v0: L.idx === 0 ? fuelV.t : loxV.t };
+    /* レバーはノブが近いもの勝ち (当たり箱が大きく、視線の角度しだいで
+       となりのレバーの箱を先に貫通するため、順番勝ちだと取りちがえる) */
+    if (dragLever === null) {
+      const kv = new THREE.Vector3();
+      let bestL = null, bestD = Infinity;
+      for (const L of leverHits) {
+        if (!ray.intersectObject(L.hit, false).length) continue;
+        L.knob.getWorldPosition(kv);
+        const d = ray.ray.distanceToPoint(kv);
+        if (d < bestD) { bestD = d; bestL = L; }
+      }
+      if (bestL) {
+        dragLever = { idx: bestL.idx, id: e.pointerId, y0: e.clientY, v0: bestL.idx === 0 ? fuelV.t : loxV.t };
         S.ratchet(0.5);
         return;
       }

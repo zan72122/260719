@@ -33,6 +33,7 @@ window.AUTOPLAY = (() => {
   let runTimeout = RUN_TIMEOUT;
   let phase = 'idle';           /* idle | scanning | gesture */
   let curStep = -1, tapAttempts = 0, stepCycles = 0;
+  let latched = null;           /* 一度完了を観測したステップの記録 (done() が非単調でも前へ進むため) */
   let lastResult = null;        /* 直近の終了理由: done | timeout | stuck | stopped | aborted */
   let g = null;                 /* 実行中のジェスチャー状態 */
   let lastX = 0, lastY = 0;
@@ -88,18 +89,44 @@ window.AUTOPLAY = (() => {
     moveDot(x, y, type !== 'pointerup' && type !== 'pointercancel');
   }
 
+  function stepDone(i) {
+    try { return !!steps[i].done(); } catch (e) { return true; }
+  }
+
+  function stepGateOpen(i) {
+    if (!steps[i].when) return true;
+    try { return !!steps[i].when(); } catch (e) { return false; }
+  }
+
   function findStep() {
+    /* 実演は前へ進む一回性のパフォーマンス。done() は非単調なことがある
+       (例: すいはんきは炊飯が入れた水を消費するので、完了済みの「水を入れる」が
+       あとから未完了に戻る)。一度完了を観測したステップはラッチして先へ進む。 */
+    let regressed = -1;
     for (let i = 0; i < steps.length; i++) {
-      let d = false;
-      try { d = !!steps[i].done(); } catch (e) { d = true; }
-      if (!d) return i;
+      if (stepDone(i)) { latched[i] = true; continue; }
+      if (!latched[i]) return i;
+      if (regressed < 0) regressed = i;
+    }
+    if (regressed >= 0) {
+      /* 未提示のステップは残っていないが、後戻りしたステップがある。
+         ゲートが開いていてやり直せるものだけ再演する (例: 金庫の円盤がずれた)。
+         ゲートが閉じているものは「工程が材料を使った」だけなので完了のまま進む。 */
+      for (let i = 0; i < steps.length; i++) {
+        if (!latched[i] || stepDone(i)) continue;
+        if (stepGateOpen(i)) { latched[i] = false; return i; }
+      }
     }
     return -1;
   }
 
+  function latchCur() {
+    if (latched && curStep >= 0 && curStep < latched.length) latched[curStep] = true;
+  }
+
   function allDone() {
     if (!steps) return true;
-    return steps.every(s => { try { return !!s.done(); } catch (e) { return true; } });
+    return steps.every((s, i) => (latched && latched[i]) || stepDone(i));
   }
 
   function easeInOut(t) {
@@ -137,7 +164,7 @@ window.AUTOPLAY = (() => {
     if (g.sub === 'settle') {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
-      if (done) { finishGesture(); return; }
+      if (done) { latchCur(); finishGesture(); return; }
       /* まだ未達成でも、ラッチのアニメーションが落ち着くまではここでじっと待つ
          (早すぎる再タップは進行中の物理を邪魔しうる)。長時間待っても変化がなければ再試行。 */
       if (elapsed >= TAP_SETTLE_TIMEOUT) {
@@ -174,6 +201,7 @@ window.AUTOPLAY = (() => {
       try { done = !!st.done(); } catch (e) { done = true; }
       const heldFor = now - g.holdStart;
       if (done || heldFor > HOLD_TIMEOUT) {
+        if (done) latchCur();
         fire('pointerup', lastX, lastY);
         finishGesture();
         return;
@@ -185,6 +213,26 @@ window.AUTOPLAY = (() => {
     }
   }
 
+  /* 視差補正サーボ: ドラッグ対象 (at が動くオブジェクトの場合) の実位置と to の
+     XZ誤差を観測し、スクリーン上の押し先を少しずつ補正する。ゲームごとに
+     「ポインターをどの高さの平面に写すか」が違うため、to の投影に合わせるだけ
+     では平面差のぶん着地がずれる (視差)。誤差が縮まらなくなったら凍結する。 */
+  function servoAdjust(a, b) {
+    if (g.servoFrozen || !g.startAt || !a || !b) return;
+    if (a.distanceTo(g.startAt) < 20) return;   /* at が静止物 (対象がつままれていない) なら何もしない */
+    _lerp.set(b.x - a.x, 0, b.z - a.z);
+    const err = _lerp.length();
+    if (err < 25) return;
+    if (err >= g.servoErr - 2) { g.servoFrozen = true; return; }  /* 進歩なし → 届かない軸の誤差 */
+    g.servoErr = err;
+    const p1 = toScreen(a);
+    const p1x = p1 && p1.x, p1y = p1 && p1.y;
+    const p2 = toScreen(_lerp.add(a));
+    if (!p1 || !p2) return;
+    g.servoX = U.clamp(g.servoX + (p2.x - p1x) * 0.8, -400, 400);
+    g.servoY = U.clamp(g.servoY + (p2.y - p1y) * 0.8, -400, 400);
+  }
+
   function driveDrag(now) {
     const st = g.step;
     const elapsed = now - g.t0;
@@ -192,6 +240,8 @@ window.AUTOPLAY = (() => {
       const p = posOf(st.at, _a);
       const s = toScreen(p);
       if (!s) { finishGesture(); return; }
+      g.startAt = p.clone();
+      g.servoX = 0; g.servoY = 0; g.servoErr = Infinity; g.servoFrozen = false;
       fire('pointerdown', s.x, s.y);
       g.sub = 'move'; g.t0 = now;
       return;
@@ -214,24 +264,29 @@ window.AUTOPLAY = (() => {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
       if (done) {
+        latchCur();
         fire('pointerup', lastX, lastY);
         finishGesture();
         return;
       }
       if (elapsed >= Math.min(DRAG_DWELL_MAX_MS, DRAG_DWELL_MS * stepCycles)) {
         /* 目標地点でそっと離す (「はなした瞬間に置く」が成立する系のため、
-           必ず to の真上へ戻ってから離す) */
+           必ず to の真上 (サーボ補正込み) へ戻ってから離す) */
         const b = posOf(st.to, _b);
         const s = b && toScreen(b);
-        if (s) fire('pointermove', s.x, s.y);
+        if (s) fire('pointermove', s.x + g.servoX, s.y + g.servoY);
         fire('pointerup', lastX, lastY);
         g.sub = 'settle'; g.t0 = now;
         return;
       }
       if (now - g.lastPing > 150) {
+        const a = posOf(st.at, _a);
         const b = posOf(st.to, _b);
-        const s = b && toScreen(b);
-        if (s) fire('pointermove', s.x, s.y);
+        if (b) {
+          servoAdjust(a, b);
+          const s = toScreen(b);
+          if (s) fire('pointermove', s.x + g.servoX, s.y + g.servoY);
+        }
         g.lastPing = now;
       }
       return;
@@ -240,6 +295,7 @@ window.AUTOPLAY = (() => {
       /* 離したあとの「置く」動作 (落下・吸着・アニメーション) が確定するのを待つ */
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
+      if (done) latchCur();
       if (done || elapsed >= DRAG_SETTLE_MS) finishGesture();
     }
   }
@@ -266,6 +322,7 @@ window.AUTOPLAY = (() => {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
       if (done || now - g.t0 > TURN_TIMEOUT) {
+        if (done) latchCur();
         fire('pointerup', lastX, lastY);
         finishGesture();
         return;
@@ -308,6 +365,7 @@ window.AUTOPLAY = (() => {
         running: phase !== 'idle', phase, curStep, allDone: allDone(), result: lastResult,
         g: g && { kind: g.kind, sub: g.sub, dir: g.dir, accum: g.accum && +g.accum.toFixed(2), flipped: g.flipped, x: lastX | 0, y: lastY | 0 },
         stepDone: steps ? steps.map(s => { try { return !!s.done(); } catch (e) { return 'ERR:' + e.message; } }) : null,
+        latched: latched ? latched.slice() : null,
       });
     }
   }
@@ -350,6 +408,7 @@ window.AUTOPLAY = (() => {
     }
     curStep = -1;
     steps = null;
+    latched = null;
     stage3 = null;
     moveDot(lastX, lastY, false);
     const cb = onEnd;
@@ -367,6 +426,7 @@ window.AUTOPLAY = (() => {
       if (!s3 || !s3.renderer || !s3.camera || !stps || !stps.length) return false;
       stage3 = s3;
       steps = stps;
+      latched = stps.map(() => false);
       onEnd = (opts && opts.onEnd) || null;
       runTimeout = (opts && opts.timeoutMs) || RUN_TIMEOUT;
       runStartT = performance.now();
