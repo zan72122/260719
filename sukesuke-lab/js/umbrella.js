@@ -584,6 +584,11 @@ window.GAMES.umbrella = (() => {
           v.x -= 90;
           return v;
         }, done: () => Math.abs(tilt.t) > 0.12 },
+        {
+          kind: 'tap', at: () => btnHit,
+          when: () => Math.abs(tilt.t) > 0.12,
+          done: () => open.p < 0.15,
+        },
       ]);
 
       prev = performance.now();
