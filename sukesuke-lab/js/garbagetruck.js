@@ -304,14 +304,17 @@ window.GAMES.garbagetruck = (() => {
       /* 4歳向けガイド: 袋を投入口へ → ボタン → 満杯で運転席 */
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => window.__pts.bag0, to: () => new THREE.Vector3(660, 160, 0),
+          /* 荷箱が満タン (排出できる量) になるまで、袋入れ→プレスを繰り返す:
+             プレスで done が後戻りし、ガイドが自然に次の袋を指す */
+          kind: 'drag', at: () => (bags.find(b => b.state === 'street') || bags[0]).g,
+          to: () => new THREE.Vector3(660, 160, 0),
           when: () => bags.some(b => b.state === 'street') && hopperBags.length === 0 && cycle === 0 && dumpAnim === 0,
-          done: () => hopperBags.length > 0 || fill > 0,
+          done: () => hopperBags.length > 0 || fill >= MAX_FILL - 0.5,
         },
         {
           kind: 'tap', at: () => btnG,
           when: () => hopperBags.length > 0 && cycle === 0,
-          done: () => fill > 0,
+          done: () => hopperBags.length === 0,
         },
         {
           kind: 'tap', at: () => window.__pts.cab,

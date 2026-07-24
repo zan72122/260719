@@ -23,6 +23,7 @@ window.AUTOPLAY = (() => {
   const DRAG_DWELL_MS = 5000;   /* 目標の上で保持する基本時間 (そそぐ・押し当てる系はここで完了する) */
   const DRAG_DWELL_MAX_MS = 20000;
   const DRAG_SETTLE_MS = 4000;  /* 目標で離したあと「置く」動作が確定するのを待つ時間 */
+  const TURN_RADIUS = 90;      /* 円運動の半径 (px)。つかむのは中心、回すのはこの半径で */
   const TURN_STEP_RAD = 0.06;   /* 金庫のタンブラー等、狭い一致窓を飛び越えないよう小刻みに */
   const TURN_ARC_BUDGET = Math.PI * 2 * 4;    /* 1方向あたりの試行角度 (円盤を1枚ずつ拾う遊びの合計を上回る余裕) */
 
@@ -287,14 +288,14 @@ window.AUTOPLAY = (() => {
       const c = toScreen(p);
       if (!c) { finishGesture(); return; }
       g.cx = c.x; g.cy = c.y;
-      g.radius = 90;
+      g.radius = 0;             /* 中心で確実につかんでから、らせん状に外へ */
       g.angle = -Math.PI / 2;
       g.dir = st.turnDir || 1;
       g.accum = 0;
       g.flipped = false;
-      const x = g.cx + Math.cos(g.angle) * g.radius;
-      const y = g.cy + Math.sin(g.angle) * g.radius;
-      fire('pointerdown', x, y);
+      /* ノブの中心で pointerdown する: 半径90pxの円周上から始めると、
+         小さなつまみ (バルブ・クランク等) では当たり判定を外れてしまう */
+      fire('pointerdown', g.cx, g.cy);
       g.sub = 'turning'; g.t0 = now;
       return;
     }
@@ -322,8 +323,13 @@ window.AUTOPLAY = (() => {
       const p = posOf(st.at, _a);
       const c = toScreen(p);
       if (c) { g.cx = c.x; g.cy = c.y; }
-      g.angle += g.dir * TURN_STEP_RAD;
-      g.accum += TURN_STEP_RAD;
+      if (g.radius < TURN_RADIUS) {
+        /* まっすぐ外へ (角度一定なので回転量には影響しない) */
+        g.radius = Math.min(TURN_RADIUS, g.radius + 18);
+      } else {
+        g.angle += g.dir * TURN_STEP_RAD;
+        g.accum += TURN_STEP_RAD;
+      }
       const x = g.cx + Math.cos(g.angle) * g.radius;
       const y = g.cy + Math.sin(g.angle) * g.radius;
       fire('pointermove', x, y);
