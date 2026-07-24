@@ -393,12 +393,14 @@ window.GAMES.mixer = (() => {
         {
           /* 入った判定は果物位置をジャーの口の高さ (560) へ視点再投影して行うため、
              to もジャーの口を指す (ドラッグ平面上のジャー中心だと視差で外れる) */
-          kind: 'drag', at: () => window.__pts.fruit0, to: () => new THREE.Vector3(JAR_X, 560, JAR_Z - 20),
+          kind: 'drag', at: () => (fruits.find(f => f.state === 'table') || fruits[0]).g,
+          to: () => new THREE.Vector3(JAR_X, 560, JAR_Z - 20),
           when: () => inJar.length === 0 && !lidOn && liquid < 0.05,
           done: () => inJar.length >= 1,
         },
         {
-          kind: 'drag', at: () => window.__pts.fruit1, to: () => new THREE.Vector3(JAR_X, 560, JAR_Z - 20),
+          kind: 'drag', at: () => (fruits.filter(f => f.state === 'table')[1] || fruits.find(f => f.state === 'table') || fruits[1]).g,
+          to: () => new THREE.Vector3(JAR_X, 560, JAR_Z - 20),
           when: () => inJar.length === 1 && !lidOn,
           done: () => inJar.length >= 2,
         },
