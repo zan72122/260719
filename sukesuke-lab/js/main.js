@@ -4,6 +4,7 @@
   const game = document.getElementById('game');
   const stage = document.getElementById('stage');
   const homeBtn = document.getElementById('homeBtn');
+  const demoBtn = document.getElementById('demoBtn');
   let current = null;
 
   /* 最初のタッチで音のロックを解除 */
@@ -31,8 +32,24 @@
     closeGame();
   });
 
+  /* 自動再生（お手本）: もう一度おすと中断、実演が終わると自動でボタンも戻る */
+  demoBtn.addEventListener('click', () => {
+    if (AUTOPLAY.isRunning()) {
+      AUTOPLAY.stop();
+      demoBtn.classList.remove('running');
+    } else {
+      S.pop();
+      const started = AUTOPLAY.run(GUIDE.getStage3(), GUIDE.getSteps(), {
+        onEnd: () => demoBtn.classList.remove('running'),
+      });
+      if (started) demoBtn.classList.add('running');
+    }
+  });
+
   function openGame(name) {
     if (current) closeGame();
+    AUTOPLAY.stop();
+    demoBtn.classList.remove('running');
     home.classList.add('hidden');
     game.classList.remove('hidden');
     current = window.GAMES[name];
@@ -40,6 +57,8 @@
   }
 
   function closeGame() {
+    AUTOPLAY.stop();
+    demoBtn.classList.remove('running');
     if (current) {
       current.stop();
       current = null;

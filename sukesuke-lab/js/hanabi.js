@@ -458,8 +458,10 @@ window.GAMES.hanabi = (() => {
       /* 4歳向けガイド: 星を詰める → 蓋 → 点火 */
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => trayHits[0], to: () => new THREE.Vector3(390, 280, 300),
-          when: () => phase === 'pack', done: () => packed.length > 0,
+          /* to はドラッグ平面 (y = BOWL.y + 30) 上のお椀の真上に置く。平面より高い点を
+             指すと、スクリーン投影→平面レイキャストの視差で着地が手前にずれてお椀を外す */
+          kind: 'drag', at: () => trayHits[0], to: () => new THREE.Vector3(BOWL.x, BOWL.y + 30, BOWL.z),
+          when: () => phase === 'pack', done: () => packed.length > 2,
         },
         {
           kind: 'tap', at: () => lidHit,

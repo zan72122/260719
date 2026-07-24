@@ -269,7 +269,7 @@ window.GAMES.mishin = (() => {
       dom.addEventListener('pointerup', onUp);
       dom.addEventListener('pointercancel', onUp);
 
-      /* 4歳向けガイド: ペダル長押し → 布を動かして曲げる */
+      /* 4歳向けガイド: ペダル長押し → 布を動かして曲げる → 曲げたまま縫う → 片付け */
       let gdSewed = false, gdCurve = false;
       GUIDE.start(stage3, [
         {
@@ -284,7 +284,20 @@ window.GAMES.mishin = (() => {
             return v;
           },
           when: () => stitchCount > 5,
-          done: () => (gdCurve = gdCurve || (stitchCount > 14 && Math.abs(clothG.position.z - 40) > 60)),
+          done: () => Math.abs(clothG.position.z - 40) > 60,
+        },
+        {
+          kind: 'hold', at: () => pedalBtn,
+          when: () => Math.abs(clothG.position.z - 40) > 60,
+          done: () => (gdCurve = gdCurve || stitchCount > 14),
+        },
+        {
+          kind: 'drag', at: () => clothG, to: () => new THREE.Vector3(-100, 79, 40),
+          when: () => gdCurve,
+          done: () => {
+            const dx = clothG.position.x + 100, dz = clothG.position.z - 40;
+            return Math.sqrt(dx * dx + dz * dz) < 40;
+          },
         },
       ]);
 

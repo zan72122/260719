@@ -209,9 +209,19 @@ window.GAMES.rocket = (() => {
 
   function onDown(e) {
     const ray = stage3.setRay(e);
-    for (const L of leverHits) {
-      if (dragLever === null && ray.intersectObject(L.hit, false).length) {
-        dragLever = { idx: L.idx, id: e.pointerId, y0: e.clientY, v0: L.idx === 0 ? fuelV.t : loxV.t };
+    /* レバーはノブが近いもの勝ち (当たり箱が大きく、視線の角度しだいで
+       となりのレバーの箱を先に貫通するため、順番勝ちだと取りちがえる) */
+    if (dragLever === null) {
+      const kv = new THREE.Vector3();
+      let bestL = null, bestD = Infinity;
+      for (const L of leverHits) {
+        if (!ray.intersectObject(L.hit, false).length) continue;
+        L.knob.getWorldPosition(kv);
+        const d = ray.ray.distanceToPoint(kv);
+        if (d < bestD) { bestD = d; bestL = L; }
+      }
+      if (bestL) {
+        dragLever = { idx: bestL.idx, id: e.pointerId, y0: e.clientY, v0: bestL.idx === 0 ? fuelV.t : loxV.t };
         S.ratchet(0.5);
         return;
       }
@@ -472,8 +482,10 @@ window.GAMES.rocket = (() => {
         return v;
       };
       GUIDE.start(stage3, [
-        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV > 0.5 },
-        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV > 0.5 },
+        /* 離陸には推力 > 重力が必要 (mixture() の q×total > 1.4)。レバー半開では
+           点火しても浮かばないので、ほぼ全開までがガイドの完了条件 */
+        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV.p > 0.9 },
+        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV.p > 0.9 },
         { kind: 'tap', at: () => ignBtn, when: () => phase === 'idle', done: () => phase !== 'idle' },
         { kind: 'tap', at: () => rocketHit, when: () => phase === 'fly' && !sep && alt > 600, done: () => sep },
       ]);

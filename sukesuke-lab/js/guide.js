@@ -25,6 +25,7 @@ window.GUIDE = (() => {
   let chev, chevMats, arc, arcMat, arcArrow;
   let stepIdx, visible, idleT, anim, lastShownStep, downCount, releaseT;
   let dom, onDown, onUp;
+  let lastStage3, lastSteps;   /* AUTOPLAY用: stop()では消さない直近キャッシュ */
   const V = () => new THREE.Vector3();
   const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
 
@@ -226,6 +227,8 @@ window.GUIDE = (() => {
       this.stop();
       stage3 = s3;
       steps = defs;
+      lastStage3 = s3;
+      lastSteps = defs;
       stepIdx = -2;
       visible = false;
       idleT = IDLE_SEC - FIRST_SEC;   /* 最初の一手はすぐ出す */
@@ -276,6 +279,10 @@ window.GUIDE = (() => {
     report() {
       if (window.__dbgGD) window.__dbgGD({ step: stepIdx, visible, idleT: +idleT.toFixed(1) });
     },
+
+    /* AUTOPLAY用: 直近の GUIDE.start(stage3, steps) をそのまま返す */
+    getStage3() { return lastStage3; },
+    getSteps() { return lastSteps; },
 
     stop() {
       if (dom) {

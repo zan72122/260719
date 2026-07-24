@@ -344,22 +344,49 @@ window.GAMES.fridge = (() => {
       let gdIn = false;
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => window.__pts.doorBot, to: () => {
+          /* ドアはスクリーン左方向へのドラッグ量で開く。ワールド固定点だと
+             カメラの向きしだいで逆方向に投影されるので、カメラの左ベクトルで示す */
+          kind: 'drag', at: () => {
+            /* つかみ判定の中心はドア原点 (ちょうつがい) から +420x のハンドル側 */
             const v = new THREE.Vector3();
             doorBot.getWorldPosition(v);
-            v.x += 300;
-            v.z += 300;
+            v.x += 420;
             return v;
+          }, to: () => {
+            const v = new THREE.Vector3();
+            doorBot.getWorldPosition(v);
+            v.x += 420;
+            v.y = 490;
+            const left = new THREE.Vector3(-1, 0, 0).applyQuaternion(stage3.camera.quaternion);
+            left.y = 0;
+            if (left.lengthSq() > 0.01) left.normalize();
+            return v.addScaledVector(left, 360);
           },
           when: () => doorBotA < 0.5, done: () => doorBotA > 0.6,
         },
         {
-          kind: 'drag', at: () => window.__pts.food0, to: () => new THREE.Vector3(-100, 500, -40),
+          /* 食品はドラッグ平面 (y=300) 上を動く。入った判定も同平面のXZなので
+             to も平面上の庫内中心を指す */
+          kind: 'drag', at: () => window.__pts.food0, to: () => new THREE.Vector3(-100, 300, -40),
           when: () => doorBotA > 0.5,
           done: () => (gdIn = gdIn || foods.some(f => f.inside)),
         },
         {
-          kind: 'drag', at: () => window.__pts.doorBot, to: () => new THREE.Vector3(200, 490, 200),
+          kind: 'drag', at: () => {
+            const v = new THREE.Vector3();
+            doorBot.getWorldPosition(v);
+            v.x += 420;
+            return v;
+          }, to: () => {
+            const v = new THREE.Vector3();
+            doorBot.getWorldPosition(v);
+            v.x += 420;
+            v.y = 490;
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(stage3.camera.quaternion);
+            right.y = 0;
+            if (right.lengthSq() > 0.01) right.normalize();
+            return v.addScaledVector(right, 360);
+          },
           when: () => foods.some(f => f.inside) && doorBotA > 0.5,
           done: () => doorBotA < 0.2,
         },

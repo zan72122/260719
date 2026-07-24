@@ -379,7 +379,26 @@ window.GAMES.extinguisher = (() => {
           done: () => pinOut,
         },
         { kind: 'hold', at: () => leverHit, when: () => pinOut, done: () => pressure < 0.97 },
-        { kind: 'drag', at: () => nozzleG, to: () => cells[1].g, when: () => pinOut, done: () => pressure < 0.72 },
+        {
+          /* ねらいは最後にさわった場所が保存される: まず火に照準を合わせる */
+          kind: 'drag', at: () => nozzleG, to: () => cells[1].g,
+          when: () => pinOut,
+          done: () => {
+            const v = new THREE.Vector3();
+            cells[1].g.getWorldPosition(v);
+            return Math.hypot(aim.x - v.x, aim.z - v.z) < 160;
+          },
+        },
+        {
+          /* 照準を合わせたまま、レバーを握りつづけて消火 */
+          kind: 'hold', at: () => leverHit,
+          when: () => {
+            const v = new THREE.Vector3();
+            cells[1].g.getWorldPosition(v);
+            return pinOut && Math.hypot(aim.x - v.x, aim.z - v.z) < 160;
+          },
+          done: () => pressure < 0.72,
+        },
       ]);
 
       prev = performance.now();

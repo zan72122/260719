@@ -127,3 +127,44 @@ html, body {
 }
 
 #homeBtn:active { transform: scale(0.9); }
+
+#demoBtn {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 10;
+  width: clamp(52px, 9vmin, 84px);
+  height: clamp(52px, 9vmin, 84px);
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.15);
+  font-size: clamp(26px, 4.6vmin, 44px);
+  cursor: pointer;
+}
+
+#demoBtn:active { transform: scale(0.9); }
+#demoBtn.running { background: rgba(255, 217, 74, 0.95); }
+
+/* 自動再生中の合成タッチを示す光る点 (ビューポート基準) */
+#autoplayDot {
+  position: fixed;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 217, 74, 0.95) 0%, rgba(255, 217, 74, 0.35) 60%, transparent 75%);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 20;
+  display: none;
+}
+
+#autoplayDot.on {
+  display: block;
+  animation: autoplayPulse 0.9s ease-in-out infinite;
+}
+
+@keyframes autoplayPulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.85); }
+  50% { transform: translate(-50%, -50%) scale(1.15); }
+}
