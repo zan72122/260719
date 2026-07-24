@@ -472,8 +472,10 @@ window.GAMES.rocket = (() => {
         return v;
       };
       GUIDE.start(stage3, [
-        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV.p > 0.5 },
-        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV.p > 0.5 },
+        /* 離陸には推力 > 重力が必要 (mixture() の q×total > 1.4)。レバー半開では
+           点火しても浮かばないので、ほぼ全開までがガイドの完了条件 */
+        { kind: 'drag', at: () => leverHits[0].knob, to: up(() => leverHits[0].knob, 150), done: () => fuelV.p > 0.9 },
+        { kind: 'drag', at: () => leverHits[1].knob, to: up(() => leverHits[1].knob, 150), done: () => loxV.p > 0.9 },
         { kind: 'tap', at: () => ignBtn, when: () => phase === 'idle', done: () => phase !== 'idle' },
         { kind: 'tap', at: () => rocketHit, when: () => phase === 'fly' && !sep && alt > 600, done: () => sep },
       ]);

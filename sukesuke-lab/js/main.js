@@ -39,10 +39,10 @@
       demoBtn.classList.remove('running');
     } else {
       S.pop();
-      AUTOPLAY.run(GUIDE.getStage3(), GUIDE.getSteps(), {
+      const started = AUTOPLAY.run(GUIDE.getStage3(), GUIDE.getSteps(), {
         onEnd: () => demoBtn.classList.remove('running'),
       });
-      demoBtn.classList.add('running');
+      if (started) demoBtn.classList.add('running');
     }
   });
 

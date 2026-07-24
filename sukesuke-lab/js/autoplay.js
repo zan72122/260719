@@ -20,7 +20,9 @@ window.AUTOPLAY = (() => {
   const HOLD_PRESS_MS = 500;    /* pump.js のように押し込み量で反応する系のための沈み込み */
   const HOLD_PRESS_PX = 70;
   const DRAG_MS = 900;
-  const DRAG_HOLD_TIMEOUT = 15000;
+  const DRAG_DWELL_MS = 5000;   /* 目標の上で保持する基本時間 (そそぐ・押し当てる系はここで完了する) */
+  const DRAG_DWELL_MAX_MS = 20000;
+  const DRAG_SETTLE_MS = 4000;  /* 目標で離したあと「置く」動作が確定するのを待つ時間 */
   const TURN_STEP_RAD = 0.06;   /* 金庫のタンブラー等、狭い一致窓を飛び越えないよう小刻みに */
   const TURN_ARC_BUDGET = Math.PI * 2 * 4;    /* 1方向あたりの試行角度 (円盤を1枚ずつ拾う遊びの合計を上回る余裕) */
   const TURN_TIMEOUT = 30000;   /* 1方向あたりの安全打ち切り (ソフトウェアレンダリング環境でも十分な余裕) */
@@ -28,14 +30,16 @@ window.AUTOPLAY = (() => {
   const MAX_STEP_CYCLES = 5;    /* 同じステップに何度もジェスチャーをやり直しても進まない場合の見切り上限 */
 
   let stage3 = null, steps = null, raf = 0, runStartT = 0, onEnd = null;
+  let runTimeout = RUN_TIMEOUT;
   let phase = 'idle';           /* idle | scanning | gesture */
   let curStep = -1, tapAttempts = 0, stepCycles = 0;
+  let lastResult = null;        /* 直近の終了理由: done | timeout | stuck | stopped | aborted */
   let g = null;                 /* 実行中のジェスチャー状態 */
   let lastX = 0, lastY = 0;
   let dotEl = null;
   let onGenuineDown = null;
 
-  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _lerp = new THREE.Vector3();
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _lerp = new THREE.Vector3(), _proj = new THREE.Vector3();
 
   function posOf(x, out) {
     const o = typeof x === 'function' ? x() : x;
@@ -53,7 +57,7 @@ window.AUTOPLAY = (() => {
     const cam = stage3 && stage3.camera;
     const el = domEl();
     if (!cam || !el || !worldPos) return null;
-    const v = _lerp.copy(worldPos).project(cam);
+    const v = _proj.copy(worldPos).project(cam);
     const r = el.getBoundingClientRect();
     return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
   }
@@ -197,36 +201,46 @@ window.AUTOPLAY = (() => {
       const a = posOf(st.at, _a);
       const b = posOf(st.to, _b);
       if (a && b) {
-        const w = _lerp.copy(a).lerp(b, easeInOut(t));
-        const s = toScreen(w.clone());
+        const s = toScreen(_lerp.copy(a).lerp(b, easeInOut(t)));
         if (s) fire('pointermove', s.x, s.y);
       }
-      if (t >= 1) { g.sub = 'hold'; g.holdStart = now; g.lastPing = now; }
+      if (t >= 1) { g.sub = 'dwell'; g.t0 = now; g.lastPing = now; }
       return;
     }
-    if (g.sub === 'hold') {
+    if (g.sub === 'dwell') {
+      /* 目標の上でにぎったまま待つ (そそぐ・レバー保持・当て続ける系はここで done() が立つ)。
+         at/to は毎回とり直す: レバーのように at が動く相対ステップは、周回ごとの
+         にぎり直しで自然に先へ進む。うまくいかない周回ほど長く待つ (低fps環境対策)。 */
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
-      const heldFor = now - g.holdStart;
-      if (done || heldFor > DRAG_HOLD_TIMEOUT) {
+      if (done) {
         fire('pointerup', lastX, lastY);
         finishGesture();
         return;
       }
-      if (now - g.lastPing > 150) {
-        const a = posOf(st.at, _a);
+      if (elapsed >= Math.min(DRAG_DWELL_MAX_MS, DRAG_DWELL_MS * stepCycles)) {
+        /* 目標地点でそっと離す (「はなした瞬間に置く」が成立する系のため、
+           必ず to の真上へ戻ってから離す) */
         const b = posOf(st.to, _b);
-        if (a && b) {
-          /* 目標地点まで来てもまだ終わらないなら、レバーのように「ヒントの矢印より
-             実際にはもっと動かす必要がある」場合に備え、同じ向きにさらに手を伸ばし続ける */
-          const a2 = a.clone(), b2 = b.clone();
-          const extra = Math.min(3, (heldFor / DRAG_HOLD_TIMEOUT) * 3);
-          const w = b2.clone().addScaledVector(b2.clone().sub(a2), extra);
-          const s = toScreen(w);
-          if (s) fire('pointermove', s.x, s.y);
-        }
+        const s = b && toScreen(b);
+        if (s) fire('pointermove', s.x, s.y);
+        fire('pointerup', lastX, lastY);
+        g.sub = 'settle'; g.t0 = now;
+        return;
+      }
+      if (now - g.lastPing > 150) {
+        const b = posOf(st.to, _b);
+        const s = b && toScreen(b);
+        if (s) fire('pointermove', s.x, s.y);
         g.lastPing = now;
       }
+      return;
+    }
+    if (g.sub === 'settle') {
+      /* 離したあとの「置く」動作 (落下・吸着・アニメーション) が確定するのを待つ */
+      let done = false;
+      try { done = !!st.done(); } catch (e) { done = true; }
+      if (done || elapsed >= DRAG_SETTLE_MS) finishGesture();
     }
   }
 
@@ -291,7 +305,7 @@ window.AUTOPLAY = (() => {
   function report() {
     if (window.__dbgAP) {
       window.__dbgAP({
-        running: phase !== 'idle', phase, curStep, allDone: allDone(),
+        running: phase !== 'idle', phase, curStep, allDone: allDone(), result: lastResult,
         g: g && { kind: g.kind, sub: g.sub, dir: g.dir, accum: g.accum && +g.accum.toFixed(2), flipped: g.flipped, x: lastX | 0, y: lastY | 0 },
         stepDone: steps ? steps.map(s => { try { return !!s.done(); } catch (e) { return 'ERR:' + e.message; } }) : null,
       });
@@ -300,35 +314,40 @@ window.AUTOPLAY = (() => {
 
   function tick(now) {
     raf = requestAnimationFrame(tick);
-    if (!stage3 || !steps) { stopInternal(); return; }
-    if (now - runStartT > RUN_TIMEOUT) { stopInternal(); return; }
+    if (!stage3 || !steps) { stopInternal('error'); return; }
+    if (now - runStartT > runTimeout) { stopInternal('timeout'); return; }
     ensureDot();
 
     if (phase === 'scanning') {
       const i = findStep();
-      if (i < 0) { stopInternal(); return; }
+      if (i < 0) { stopInternal('done'); return; }
       const st = steps[i];
       let gateOpen = true;
       if (st.when) { try { gateOpen = !!st.when(); } catch (e) { gateOpen = false; } }
       if (!gateOpen) { report(); return; }
       if (i !== curStep) { curStep = i; tapAttempts = 0; stepCycles = 0; }
       stepCycles++;
-      if (stepCycles > MAX_STEP_CYCLES) { stopInternal(); return; }
+      if (stepCycles > MAX_STEP_CYCLES) { stopInternal('stuck'); return; }
       beginGesture(st, now);
     }
     if (phase === 'gesture') driveGesture(now);
     report();
   }
 
-  function stopInternal() {
-    const el = domEl();
+  function stopInternal(reason) {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
-    if (onGenuineDown && el) el.removeEventListener('pointerdown', onGenuineDown);
+    /* にぎったままの合成指を必ず離す (ゲームやguide.jsをドラッグ中状態のまま取り残さない) */
+    if (g) { fire('pointercancel', lastX, lastY); g = null; }
+    if (onGenuineDown) window.removeEventListener('pointerdown', onGenuineDown, true);
     onGenuineDown = null;
     const wasRunning = phase !== 'idle';
     phase = 'idle';
-    g = null;
+    if (wasRunning) {
+      /* steps を消す前に、最終状態を正直に報告する (失敗した停止を成功と偽らない) */
+      lastResult = reason || 'stopped';
+      report();
+    }
     curStep = -1;
     steps = null;
     stage3 = null;
@@ -336,34 +355,42 @@ window.AUTOPLAY = (() => {
     const cb = onEnd;
     onEnd = null;
     if (wasRunning && cb) { try { cb(); } catch (e) { /* ignore */ } }
-    report();
   }
 
   function abortForRealTouch() {
-    if (g) fire('pointercancel', lastX, lastY);
-    stopInternal();
+    stopInternal('aborted');
   }
 
   return {
     run(s3, stps, opts) {
-      stopInternal();
-      if (!s3 || !s3.renderer || !s3.camera || !stps || !stps.length) return;
+      stopInternal('stopped');
+      if (!s3 || !s3.renderer || !s3.camera || !stps || !stps.length) return false;
       stage3 = s3;
       steps = stps;
       onEnd = (opts && opts.onEnd) || null;
+      runTimeout = (opts && opts.timeoutMs) || RUN_TIMEOUT;
       runStartT = performance.now();
+      lastResult = null;
       phase = 'scanning';
       curStep = -1;
       tapAttempts = 0;
+      stepCycles = 0;
       ensureDot();
+      /* キャプチャ段階のwindowリスナー: ゲームが本物のタッチを処理する前に
+         合成指を pointercancel で離してから停止する (本物のタッチが巻き添えで
+         キャンセルされない・きれいな順序で操作がユーザーへ返る)。
+         ボタン類 (🪄/🏠) へのタッチは対象外にして、🪄のトグル停止をこわさない。 */
       onGenuineDown = (e) => {
         if (e.pointerId === SYN_ID) return;
+        const el = domEl();
+        if (!el || (e.target !== el && !el.contains(e.target))) return;
         abortForRealTouch();
       };
-      domEl().addEventListener('pointerdown', onGenuineDown);
+      window.addEventListener('pointerdown', onGenuineDown, true);
       raf = requestAnimationFrame(tick);
+      return true;
     },
-    stop() { stopInternal(); },
+    stop() { stopInternal('stopped'); },
     isRunning() { return phase !== 'idle'; },
   };
 })();
