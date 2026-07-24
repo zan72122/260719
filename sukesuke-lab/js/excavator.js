@@ -410,12 +410,26 @@ window.GAMES.excavator = (() => {
           done: () => beta < 0.35,
         },
         {
+          /* すくいは「アームを土に通す往復」で少しずつたまる。腕を伸ばし直してから
+             すくい上げる2段構え (すくいで gamma が上がるとこのステップが後戻りし、
+             土が入るまで自然に往復する) */
           kind: 'drag', at: () => lever2G, to: () => {
             const v = new THREE.Vector3();
             lever2G.getWorldPosition(v);
-            v.y += 150;
+            v.y -= 170;
             return v;
           },
+          when: () => beta < 0.5,
+          done: () => gdDug || gamma < 1.25,
+        },
+        {
+          kind: 'drag', at: () => lever2G, to: () => {
+            const v = new THREE.Vector3();
+            lever2G.getWorldPosition(v);
+            v.y += 170;
+            return v;
+          },
+          when: () => beta < 0.5 && gamma < 1.4,
           done: () => (gdDug = gdDug || load > 0.25),
         },
         {
