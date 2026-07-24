@@ -13,7 +13,6 @@
 window.AUTOPLAY = (() => {
   const SYN_ID = 999001;
   const RUN_TIMEOUT = 180000;   /* 全体の安全打ち切り (複数タンブラーの連鎖ピック手順や、ゆっくり収束する物理は長くなりうる) */
-  const TAP_HOLD_MS = 120;
   const TAP_SETTLE_TIMEOUT = 15000;  /* バネで確定するラッチ機構 (ぺんのノック等) が落ち着くのを待つ。早すぎる再タップは進行中のラッチ動作を邪魔しうるので、ここは長めに待ってから再試行する */
   const MAX_TAP_ATTEMPTS = 2;
   const TAP_SETTLE_TICKS = 30;  /* 再試行前に最低これだけのフレームを見送る */
@@ -153,22 +152,15 @@ window.AUTOPLAY = (() => {
       const p = posOf(st.at, _a);
       const s = toScreen(p);
       if (!s) { finishGesture(); return; }
+      /* down と up は同じフレーム内で連続送出する。ぺんやかさは「押してから
+         200ms前後までに離した素早いタップ」だけをカチッと扱うが、フレームや
+         タイマーは描画負荷で平気で数秒遅れる環境がある。ハンドラは同期実行
+         なので、0ms のタップはどの環境でも確実に「素早いタップ」になる */
       fire('pointerdown', s.x, s.y);
-      g.sub = 'down'; g.t0 = now;
-      /* 離しはフレームループではなく壁時計タイマーで発火する: ぺんやかさは
-         「短いタップ」(押してから200ms前後まで) だけをカチッと扱うので、
-         描画が遅い環境で次フレームまで待つと長押し扱いになってしまう */
-      const gg = g;
-      gg.upTimer = setTimeout(() => {
-        if (g === gg && gg.sub === 'down') {
-          gg.upTimer = 0;
-          fire('pointerup', lastX, lastY);
-          gg.sub = 'settle'; gg.t0 = performance.now(); gg.settleTicks = 0;
-        }
-      }, TAP_HOLD_MS);
+      fire('pointerup', s.x, s.y);
+      g.sub = 'settle'; g.t0 = now; g.settleTicks = 0;
       return;
     }
-    if (g.sub === 'down') return;   /* upTimer 待ち */
     if (g.sub === 'settle') {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
@@ -386,11 +378,7 @@ window.AUTOPLAY = (() => {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     /* にぎったままの合成指を必ず離す (ゲームやguide.jsをドラッグ中状態のまま取り残さない) */
-    if (g) {
-      if (g.upTimer) { clearTimeout(g.upTimer); g.upTimer = 0; }
-      fire('pointercancel', lastX, lastY);
-      g = null;
-    }
+    if (g) { fire('pointercancel', lastX, lastY); g = null; }
     if (onGenuineDown) window.removeEventListener('pointerdown', onGenuineDown, true);
     onGenuineDown = null;
     const wasRunning = phase !== 'idle';
