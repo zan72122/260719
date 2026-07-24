@@ -374,12 +374,19 @@ window.GAMES.busdoor = (() => {
       let gdOff = false;
       GUIDE.start(stage3, [
         {
-          kind: 'drag', at: () => window.__pts.doll0, to: () => icReader,
+          /* 人形は y=220 の平面上を動き、かざした判定も同平面のXZ距離。
+             to はリーダーの真下 (平面上) を指す (リーダー自体は高い位置にあり視差で外れる) */
+          kind: 'drag', at: () => window.__pts.doll0, to: () => {
+            const v = new THREE.Vector3();
+            icReader.getWorldPosition(v);
+            v.y = 220;
+            return v;
+          },
           when: () => doorOpen > 0.5 && dolls[0].state === 'street',
           done: () => dolls.some(d => d.tapped),
         },
         {
-          kind: 'drag', at: () => window.__pts.doll0, to: () => new THREE.Vector3(-260, 260, -60),
+          kind: 'drag', at: () => window.__pts.doll0, to: () => new THREE.Vector3(-260, 220, -60),
           when: () => doorOpen > 0.5 && dolls.some(d => d.tapped && d.state !== 'in'),
           done: () => dolls.some(d => d.state === 'in'),
         },
