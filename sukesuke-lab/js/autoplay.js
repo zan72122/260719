@@ -12,22 +12,24 @@
  */
 window.AUTOPLAY = (() => {
   const SYN_ID = 999001;
-  const RUN_TIMEOUT = 120000;   /* 全体の安全打ち切り (金庫のような複数タンブラーの連鎖ピック手順は長くなりうる) */
+  const RUN_TIMEOUT = 180000;   /* 全体の安全打ち切り (複数タンブラーの連鎖ピック手順や、ゆっくり収束する物理は長くなりうる) */
   const TAP_HOLD_MS = 120;
-  const TAP_SETTLE_MS = 500;    /* バネで確定するラッチ機構 (ぺんのノック等) が落ち着くのを待つ */
-  const MAX_TAP_ATTEMPTS = 3;
-  const HOLD_TIMEOUT = 10000;
+  const TAP_SETTLE_TIMEOUT = 15000;  /* バネで確定するラッチ機構 (ぺんのノック等) が落ち着くのを待つ。早すぎる再タップは進行中のラッチ動作を邪魔しうるので、ここは長めに待ってから再試行する */
+  const MAX_TAP_ATTEMPTS = 2;
+  const HOLD_TIMEOUT = 20000;
   const HOLD_PRESS_MS = 500;    /* pump.js のように押し込み量で反応する系のための沈み込み */
   const HOLD_PRESS_PX = 70;
   const DRAG_MS = 900;
-  const DRAG_HOLD_TIMEOUT = 6000;
+  const DRAG_HOLD_TIMEOUT = 15000;
   const TURN_STEP_RAD = 0.06;   /* 金庫のタンブラー等、狭い一致窓を飛び越えないよう小刻みに */
   const TURN_ARC_BUDGET = Math.PI * 2 * 4;    /* 1方向あたりの試行角度 (円盤を1枚ずつ拾う遊びの合計を上回る余裕) */
   const TURN_TIMEOUT = 30000;   /* 1方向あたりの安全打ち切り (ソフトウェアレンダリング環境でも十分な余裕) */
 
+  const MAX_STEP_CYCLES = 5;    /* 同じステップに何度もジェスチャーをやり直しても進まない場合の見切り上限 */
+
   let stage3 = null, steps = null, raf = 0, runStartT = 0, onEnd = null;
   let phase = 'idle';           /* idle | scanning | gesture */
-  let curStep = -1, tapAttempts = 0;
+  let curStep = -1, tapAttempts = 0, stepCycles = 0;
   let g = null;                 /* 実行中のジェスチャー状態 */
   let lastX = 0, lastY = 0;
   let dotEl = null;
@@ -128,14 +130,19 @@ window.AUTOPLAY = (() => {
       }
       return;
     }
-    if (g.sub === 'settle' && elapsed >= TAP_SETTLE_MS) {
-      tapAttempts++;
+    if (g.sub === 'settle') {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
-      if (!done && tapAttempts < MAX_TAP_ATTEMPTS) {
-        g.sub = 'start'; g.t0 = now;   /* トグル系: もう一度タップし直す */
-      } else {
-        finishGesture();
+      if (done) { finishGesture(); return; }
+      /* まだ未達成でも、ラッチのアニメーションが落ち着くまではここでじっと待つ
+         (早すぎる再タップは進行中の物理を邪魔しうる)。長時間待っても変化がなければ再試行。 */
+      if (elapsed >= TAP_SETTLE_TIMEOUT) {
+        tapAttempts++;
+        if (tapAttempts < MAX_TAP_ATTEMPTS) {
+          g.sub = 'start'; g.t0 = now;
+        } else {
+          finishGesture();
+        }
       }
     }
   }
@@ -200,16 +207,25 @@ window.AUTOPLAY = (() => {
     if (g.sub === 'hold') {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
-      const b = posOf(st.to, _b);
-      if (b && now - g.lastPing > 150) {
-        const s = toScreen(b);
-        if (s) fire('pointermove', s.x, s.y);
-        g.lastPing = now;
-      }
       const heldFor = now - g.holdStart;
       if (done || heldFor > DRAG_HOLD_TIMEOUT) {
         fire('pointerup', lastX, lastY);
         finishGesture();
+        return;
+      }
+      if (now - g.lastPing > 150) {
+        const a = posOf(st.at, _a);
+        const b = posOf(st.to, _b);
+        if (a && b) {
+          /* 目標地点まで来てもまだ終わらないなら、レバーのように「ヒントの矢印より
+             実際にはもっと動かす必要がある」場合に備え、同じ向きにさらに手を伸ばし続ける */
+          const a2 = a.clone(), b2 = b.clone();
+          const extra = Math.min(3, (heldFor / DRAG_HOLD_TIMEOUT) * 3);
+          const w = b2.clone().addScaledVector(b2.clone().sub(a2), extra);
+          const s = toScreen(w);
+          if (s) fire('pointermove', s.x, s.y);
+        }
+        g.lastPing = now;
       }
     }
   }
@@ -276,7 +292,7 @@ window.AUTOPLAY = (() => {
     if (window.__dbgAP) {
       window.__dbgAP({
         running: phase !== 'idle', phase, curStep, allDone: allDone(),
-        g: g && { kind: g.kind, sub: g.sub, dir: g.dir, accum: g.accum && +g.accum.toFixed(2), flipped: g.flipped },
+        g: g && { kind: g.kind, sub: g.sub, dir: g.dir, accum: g.accum && +g.accum.toFixed(2), flipped: g.flipped, x: lastX | 0, y: lastY | 0 },
         stepDone: steps ? steps.map(s => { try { return !!s.done(); } catch (e) { return 'ERR:' + e.message; } }) : null,
       });
     }
@@ -295,7 +311,9 @@ window.AUTOPLAY = (() => {
       let gateOpen = true;
       if (st.when) { try { gateOpen = !!st.when(); } catch (e) { gateOpen = false; } }
       if (!gateOpen) { report(); return; }
-      if (i !== curStep) { curStep = i; tapAttempts = 0; }
+      if (i !== curStep) { curStep = i; tapAttempts = 0; stepCycles = 0; }
+      stepCycles++;
+      if (stepCycles > MAX_STEP_CYCLES) { stopInternal(); return; }
       beginGesture(st, now);
     }
     if (phase === 'gesture') driveGesture(now);
