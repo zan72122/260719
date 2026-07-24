@@ -117,8 +117,13 @@ window.AUTOPLAY = (() => {
         regressedOpen = i;
       }
     }
-    if (regressedOpen >= 0) { latched[regressedOpen] = false; return regressedOpen; }
-    if (firstBlocked >= 0) return firstBlocked;
+    if (firstBlocked >= 0) {
+      /* やり直しは「まだ演じていないステップの前進が塞がれている」ときだけ。
+         全ステップを一度演じ終えたのに後戻りだけが残る状態 (かさの開→閉のように
+         同じ状態を往復する演目) でやり直すと、開いて閉じてを永遠にくり返してしまう */
+      if (regressedOpen >= 0) { latched[regressedOpen] = false; return regressedOpen; }
+      return firstBlocked;
+    }
     return -1;
   }
 
