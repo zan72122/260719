@@ -613,6 +613,12 @@ window.GAMES.pen = (() => {
     camera.position.setFromSpherical(sp).add(orbit.target);
     camera.lookAt(orbit.target);
 
+    if (window.__dbgPN) {
+      window.__dbgPN({
+        engaged, pressId, pending: pendingRelease,
+        t: +plunger.t.toFixed(1), p: +plunger.p.toFixed(1), ink: inkUse | 0,
+      });
+    }
     GUIDE.tick(dt);
     renderer.render(scene, camera);
     raf = requestAnimationFrame(loop);

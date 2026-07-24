@@ -16,6 +16,7 @@ window.AUTOPLAY = (() => {
   const TAP_HOLD_MS = 120;
   const TAP_SETTLE_TIMEOUT = 15000;  /* バネで確定するラッチ機構 (ぺんのノック等) が落ち着くのを待つ。早すぎる再タップは進行中のラッチ動作を邪魔しうるので、ここは長めに待ってから再試行する */
   const MAX_TAP_ATTEMPTS = 2;
+  const TAP_SETTLE_TICKS = 30;  /* 再試行前に最低これだけのフレームを見送る */
   const HOLD_TIMEOUT = 20000;
   const HOLD_PRESS_MS = 500;    /* pump.js のように押し込み量で反応する系のための沈み込み */
   const HOLD_PRESS_PX = 70;
@@ -162,7 +163,7 @@ window.AUTOPLAY = (() => {
         if (g === gg && gg.sub === 'down') {
           gg.upTimer = 0;
           fire('pointerup', lastX, lastY);
-          gg.sub = 'settle'; gg.t0 = performance.now();
+          gg.sub = 'settle'; gg.t0 = performance.now(); gg.settleTicks = 0;
         }
       }, TAP_HOLD_MS);
       return;
@@ -172,9 +173,12 @@ window.AUTOPLAY = (() => {
       let done = false;
       try { done = !!st.done(); } catch (e) { done = true; }
       if (done) { latchCur(); finishGesture(); return; }
-      /* まだ未達成でも、ラッチのアニメーションが落ち着くまではここでじっと待つ
-         (早すぎる再タップは進行中の物理を邪魔しうる)。長時間待っても変化がなければ再試行。 */
-      if (elapsed >= TAP_SETTLE_TIMEOUT) {
+      /* まだ未達成でも、ラッチのアニメーションが落ち着くまではここでじっと待つ。
+         時間だけでなく描画フレーム数でも待つ: バネの押し→戻り行程は十数フレーム
+         かかり、描画が遅い環境では壁時計だけだと早すぎる再タップになる。
+         トグル機構への再タップは進んだ状態を巻き戻してしまうので特に危険。 */
+      g.settleTicks = (g.settleTicks || 0) + 1;
+      if (elapsed >= TAP_SETTLE_TIMEOUT && g.settleTicks >= TAP_SETTLE_TICKS) {
         tapAttempts++;
         if (tapAttempts < MAX_TAP_ATTEMPTS) {
           g.sub = 'start'; g.t0 = now;
