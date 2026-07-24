@@ -100,23 +100,25 @@ window.AUTOPLAY = (() => {
 
   function findStep() {
     /* 実演は前へ進む一回性のパフォーマンス。done() は非単調なことがある
-       (例: すいはんきは炊飯が入れた水を消費するので、完了済みの「水を入れる」が
-       あとから未完了に戻る)。一度完了を観測したステップはラッチして先へ進む。 */
-    let regressed = -1;
+       (例: すいはんきは炊飯が入れた水を消費する、ミキサーは注ぐとジュースが減る) ので、
+       一度完了を観測したステップはラッチして前進する。優先順位:
+       1. 未提示でゲートが開いているステップ → すぐ演じる
+       2. 後戻りしていてゲートが開いているステップ → やり直す
+          (金庫の円盤がずれた/ジュースが足りず果物を足す、など。ゲート持ちの
+           未提示ステップが素材切れで開かないときも、これが素材を作り直す)
+       3. 未提示でゲートが閉じているステップ → 開くのを待つ */
+    let firstBlocked = -1, regressedOpen = -1;
     for (let i = 0; i < steps.length; i++) {
       if (stepDone(i)) { latched[i] = true; continue; }
-      if (!latched[i]) return i;
-      if (regressed < 0) regressed = i;
-    }
-    if (regressed >= 0) {
-      /* 未提示のステップは残っていないが、後戻りしたステップがある。
-         ゲートが開いていてやり直せるものだけ再演する (例: 金庫の円盤がずれた)。
-         ゲートが閉じているものは「工程が材料を使った」だけなので完了のまま進む。 */
-      for (let i = 0; i < steps.length; i++) {
-        if (!latched[i] || stepDone(i)) continue;
-        if (stepGateOpen(i)) { latched[i] = false; return i; }
+      if (!latched[i]) {
+        if (stepGateOpen(i)) return i;
+        if (firstBlocked < 0) firstBlocked = i;
+      } else if (regressedOpen < 0 && stepGateOpen(i)) {
+        regressedOpen = i;
       }
     }
+    if (regressedOpen >= 0) { latched[regressedOpen] = false; return regressedOpen; }
+    if (firstBlocked >= 0) return firstBlocked;
     return -1;
   }
 
