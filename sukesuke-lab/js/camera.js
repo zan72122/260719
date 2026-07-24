@@ -581,13 +581,16 @@ window.GAMES.camera = (() => {
       /* 4歳向けガイド: 巻き上げ → シャッター → 撮り切ったら巻き戻し */
       GUIDE.start(stage3, [
         {
+          /* 巻き上げレバーはスクリーン右方向へのドラッグ量で動く。ワールド固定点
+             ではカメラの向きしだいで逆に投影されるため、カメラの右ベクトルで示す */
           kind: 'drag', at: () => leverG,
           to: () => {
             const v = new THREE.Vector3();
             leverG.getWorldPosition(v);
-            v.x += 130;
-            v.z += 110;
-            return v;
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(stage3.camera.quaternion);
+            right.y = 0;
+            if (right.lengthSq() > 0.01) right.normalize();
+            return v.addScaledVector(right, 300);
           },
           when: () => !rewinding && count < MAXSHOT, done: () => cocked || count > 0,
         },
