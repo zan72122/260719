@@ -62,6 +62,9 @@
     document.getElementById('play-circus').addEventListener('pointerdown', () => {
       Sound.unlock(); startMode(Circus);
     });
+    document.getElementById('play-cookie').addEventListener('pointerdown', () => {
+      Sound.unlock(); startMode(Cookie);
+    });
     document.getElementById('btn-home').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       Sound.fx.click();

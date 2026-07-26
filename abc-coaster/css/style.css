@@ -106,6 +106,7 @@ html, body {
 #play-coaster { background: linear-gradient(#ff8a5c, #f4623a); }
 #play-balloon { background: linear-gradient(#ff9ec6, #f0629a); }
 #play-circus  { background: linear-gradient(#b48cf2, #7d4fd3); }
+#play-cookie  { background: linear-gradient(#d9a45c, #b57a3e); }
 
 /* ---------- 共通 ---------- */
 
@@ -305,6 +306,48 @@ html, body {
   left: 50%;
   bottom: calc(24px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
+}
+
+/* ---------- もじクッキーやさん ---------- */
+
+#ck-tools {
+  position: absolute;
+  left: 50%;
+  bottom: calc(22px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: clamp(16px, 4vmin, 40px);
+}
+
+.tool-big {
+  font-family: var(--font);
+  width: clamp(120px, 24vmin, 180px);
+  height: clamp(100px, 20vmin, 150px);
+  border: none;
+  border-radius: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: clamp(40px, 8.5vmin, 64px);
+  background: rgba(255,255,255,0.94);
+  box-shadow: 0 7px 0 rgba(0,0,0,0.15), 0 12px 20px rgba(120,60,0,0.3);
+  cursor: pointer;
+  animation: wiggle 2.4s ease-in-out infinite;
+}
+.tool-big:nth-child(2) { animation-delay: 0.4s; }
+.tool-big:active { transform: scale(0.92); }
+.tool-big span {
+  font-size: clamp(15px, 3vmin, 22px);
+  font-weight: 900;
+  color: #8a5a2b;
+}
+.tool-big.attention { animation: attention 0.6s ease 2; }
+@keyframes attention {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.18) rotate(-4deg); }
+  60% { transform: scale(1.12) rotate(4deg); }
 }
 
 .big-next {
