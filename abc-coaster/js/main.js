@@ -65,6 +65,15 @@
     document.getElementById('play-cookie').addEventListener('pointerdown', () => {
       Sound.unlock(); startMode(Cookie);
     });
+    document.getElementById('play-drive').addEventListener('pointerdown', () => {
+      Sound.unlock(); startMode(Drive);
+    });
+    document.getElementById('play-kite').addEventListener('pointerdown', () => {
+      Sound.unlock(); startMode(Kite);
+    });
+    document.getElementById('play-music').addEventListener('pointerdown', () => {
+      Sound.unlock(); startMode(MusicBox);
+    });
     document.getElementById('btn-home').addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       Sound.fx.click();
@@ -87,7 +96,10 @@
   canvas.addEventListener('pointercancel', up);
 
   document.addEventListener('gesturestart', (e) => e.preventDefault());
-  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    // オルゴールの文字トレイだけは横スクロールを許可
+    if (!(e.target.closest && e.target.closest('#mb-tray'))) e.preventDefault();
+  }, { passive: false });
   document.addEventListener('dblclick', (e) => e.preventDefault());
 
   /* ---------- タイトル画面の背景 (小さなデモコース) ---------- */

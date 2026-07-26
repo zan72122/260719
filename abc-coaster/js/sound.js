@@ -170,6 +170,17 @@ const Sound = (() => {
         tone({ freq: f, type: 'sine', dur: 0.4, vol: 0.16, delay: i * 0.14 }));
     },
 
+    /* --- もじオルゴール用 --- */
+    note(freq, dur, delay = 0) { // オルゴールのやわらかい音色 (倍音つき)
+      tone({ freq, type: 'sine', dur: Math.max(0.22, dur * 0.95), vol: 0.22, delay });
+      tone({ freq: freq * 2, type: 'sine', dur: 0.16, vol: 0.07, delay });
+      tone({ freq: freq * 4, type: 'sine', dur: 0.09, vol: 0.035, delay });
+    },
+    slide(f0, f1, dur, delay = 0) { // 線の上り下り = グリッサンド
+      tone({ freq: f0, slideTo: f1, type: 'sine', dur: Math.max(0.18, dur * 0.95), vol: 0.2, delay });
+      tone({ freq: f0 * 2, slideTo: f1 * 2, type: 'sine', dur: Math.max(0.14, dur * 0.7), vol: 0.05, delay });
+    },
+
     /* --- さかさまサーカス用 --- */
     drumroll() {
       for (let i = 0; i < 16; i++) noise({ dur: 0.05, vol: 0.14, freq: 250, delay: i * 0.055, q: 2 });

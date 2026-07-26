@@ -85,9 +85,9 @@ html, body {
 .mode-btn {
   font-family: var(--font);
   border: none;
-  border-radius: 26px;
-  width: clamp(104px, 22vmin, 165px);
-  min-height: clamp(104px, 22vmin, 165px);
+  border-radius: 24px;
+  width: clamp(92px, 18vmin, 140px);
+  min-height: clamp(92px, 18vmin, 140px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -99,14 +99,18 @@ html, body {
   transition: transform 0.1s;
 }
 .mode-btn:active { transform: translateY(6px) scale(0.97); box-shadow: 0 2px 0 rgba(0,0,0,0.18); }
-.mode-btn .icon { font-size: clamp(40px, 9vmin, 66px); line-height: 1; }
-.mode-btn .label-en { font-size: clamp(15px, 3.4vmin, 24px); font-weight: 900; letter-spacing: 0.04em; }
-.mode-btn .label-ja { font-size: clamp(11px, 2.2vmin, 15px); opacity: 0.92; }
+.mode-btn .icon { font-size: clamp(34px, 7.5vmin, 54px); line-height: 1; }
+.mode-btn .label-en { font-size: clamp(13px, 2.8vmin, 20px); font-weight: 900; letter-spacing: 0.04em; }
+.mode-btn .label-ja { font-size: clamp(10px, 2vmin, 14px); opacity: 0.92; }
+#title-buttons { max-width: 92vw; }
 
 #play-coaster { background: linear-gradient(#ff8a5c, #f4623a); }
 #play-balloon { background: linear-gradient(#ff9ec6, #f0629a); }
 #play-circus  { background: linear-gradient(#b48cf2, #7d4fd3); }
 #play-cookie  { background: linear-gradient(#d9a45c, #b57a3e); }
+#play-drive   { background: linear-gradient(#8fd964, #5aab35); }
+#play-kite    { background: linear-gradient(#5cc9ff, #2f8fdd); }
+#play-music   { background: linear-gradient(#7a6bd9, #4a3a9e); }
 
 /* ---------- 共通 ---------- */
 
@@ -349,6 +353,127 @@ html, body {
   30% { transform: scale(1.18) rotate(-4deg); }
   60% { transform: scale(1.12) rotate(4deg); }
 }
+
+/* ---------- もじドライブ ---------- */
+
+#dr-horn {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: clamp(66px, 12vmin, 96px);
+  height: clamp(66px, 12vmin, 96px);
+  border: none;
+  border-radius: 50%;
+  font-size: clamp(30px, 6vmin, 46px);
+  background: rgba(255,255,255,0.92);
+  box-shadow: 0 5px 0 rgba(0,0,0,0.15), 0 9px 16px rgba(0,60,0,0.3);
+  cursor: pointer;
+}
+#dr-horn:active { transform: scale(0.9); }
+
+/* ---------- もじたこあげ ---------- */
+
+#kt-cards {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: clamp(12px, 3vmin, 24px);
+}
+
+/* ---------- もじオルゴール ---------- */
+
+#mb-slots {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+
+.mb-slot {
+  font-family: var(--font);
+  width: clamp(44px, 9vmin, 64px);
+  height: clamp(44px, 9vmin, 64px);
+  border: 3px dashed rgba(255,255,255,0.5);
+  border-radius: 14px;
+  font-size: clamp(24px, 5vmin, 38px);
+  font-weight: 900;
+  color: #fff;
+  background: rgba(255,255,255,0.12);
+  cursor: pointer;
+}
+.mb-slot.filled {
+  border-style: solid;
+  border-color: rgba(255,255,255,0.85);
+  background: var(--c, #888);
+  box-shadow: 0 3px 0 rgba(0,0,0,0.25);
+}
+.mb-slot.now {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px #ffd45c, 0 3px 0 rgba(0,0,0,0.25);
+}
+
+#mb-controls {
+  position: absolute;
+  right: calc(12px + env(safe-area-inset-right));
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mb-btn {
+  font-family: var(--font);
+  width: clamp(52px, 10vmin, 72px);
+  height: clamp(52px, 10vmin, 72px);
+  border: none;
+  border-radius: 50%;
+  font-size: clamp(22px, 4.5vmin, 34px);
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.2);
+  cursor: pointer;
+}
+.mb-btn:active { transform: scale(0.9); }
+.mb-btn.on { box-shadow: 0 0 0 4px #ffd45c, 0 4px 0 rgba(0,0,0,0.2); }
+
+#mb-tray {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  gap: 7px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+  background: rgba(20, 12, 40, 0.55);
+  backdrop-filter: blur(4px);
+  touch-action: pan-x;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+#mb-tray::-webkit-scrollbar { display: none; }
+
+.letter-btn {
+  font-family: var(--font);
+  width: clamp(50px, 8.4vmin, 68px);
+  height: clamp(50px, 8.4vmin, 68px);
+  border: none;
+  border-radius: 15px;
+  font-size: clamp(26px, 4.6vmin, 38px);
+  font-weight: 900;
+  color: #fff;
+  background: var(--c, #888);
+  box-shadow: 0 4px 0 rgba(0,0,0,0.25);
+  cursor: pointer;
+}
+.letter-btn:active { transform: scale(0.9); }
 
 .big-next {
   position: absolute;
